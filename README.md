@@ -21,12 +21,6 @@
 </p>
 
 <p align="center">
-
-https://github.com/user-attachments/assets/76af060c-fdb1-40cb-b575-46c7a807845d
-
-</p>
-
-<p align="center">
   <a href="https://missioncontrol.ghray.com"><strong>🎮 Live Demo</strong></a> •
   <a href="#-quick-start">Quick Start</a> •
   <a href="#-docker">Docker</a> •
@@ -36,8 +30,12 @@ https://github.com/user-attachments/assets/76af060c-fdb1-40cb-b575-46c7a807845d
   <a href="#-contributors">Contributors</a>
 </p>
 
----
+<p align="center">
+
 https://github.com/user-attachments/assets/76af060c-fdb1-40cb-b575-46c7a807845d
+
+</p>
+
 ---
 
 ## 🆕 What's New in v1.5.0
