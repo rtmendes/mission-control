@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Rocket, Play, Layers, Lightbulb, BarChart3, FileText, Zap, Loader } from 'lucide-react';
+import { ArrowLeft, Rocket, Play, Layers, Lightbulb, BarChart3, FileText, Zap, Loader, Settings, X, Save, ExternalLink } from 'lucide-react';
 import { SwipeDeck } from '@/components/autopilot/SwipeDeck';
 import { IdeasList } from '@/components/autopilot/IdeasList';
 import { ResearchReport } from '@/components/autopilot/ResearchReport';
@@ -24,6 +24,11 @@ export default function ProductDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [pipeline, setPipeline] = useState<PipelineState>('idle');
   const [pipelineError, setPipelineError] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsForm, setSettingsForm] = useState<Record<string, string>>({});
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsSaved, setSettingsSaved] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -108,6 +113,56 @@ export default function ProductDashboardPage() {
     }
   }, [pipeline]);
 
+  function openSettings() {
+    if (!product) return;
+    setSettingsForm({
+      name: product.name,
+      description: product.description || '',
+      repo_url: product.repo_url || '',
+      live_url: product.live_url || '',
+      default_branch: product.default_branch || 'main',
+      build_mode: product.build_mode || 'plan_first',
+      icon: product.icon || '📦',
+    });
+    setSettingsError(null);
+    setSettingsSaved(false);
+    setShowSettings(true);
+  }
+
+  async function saveSettings() {
+    setSettingsSaving(true);
+    setSettingsError(null);
+    setSettingsSaved(false);
+    try {
+      const body: Record<string, unknown> = {
+        name: settingsForm.name,
+        description: settingsForm.description || undefined,
+        repo_url: settingsForm.repo_url || null,
+        live_url: settingsForm.live_url || null,
+        default_branch: settingsForm.default_branch || 'main',
+        build_mode: settingsForm.build_mode,
+        icon: settingsForm.icon,
+      };
+      const res = await fetch(`/api/products/${productId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Save failed' }));
+        throw new Error(err.error || `Save failed (${res.status})`);
+      }
+      const updated = await res.json();
+      setProduct(updated);
+      setSettingsSaved(true);
+      setTimeout(() => { setSettingsSaved(false); setShowSettings(false); }, 800);
+    } catch (err) {
+      setSettingsError((err as Error).message);
+    } finally {
+      setSettingsSaving(false);
+    }
+  }
+
   if (loading || !product) {
     return (
       <div className="min-h-screen bg-mc-bg flex items-center justify-center">
@@ -185,6 +240,13 @@ export default function ProductDashboardPage() {
               <Rocket className="w-4 h-4" />
               Full Screen Swipe
             </Link>
+            <button
+              onClick={openSettings}
+              className="min-h-11 w-11 rounded-lg bg-mc-bg-tertiary border border-mc-border text-mc-text-secondary hover:text-mc-text flex items-center justify-center"
+              title="Product Settings"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
           </div>
         </div>
       </header>
@@ -224,6 +286,142 @@ export default function ProductDashboardPage() {
         {/* Activity panel — desktop: right side column, mobile: floating button + drawer */}
         <ActivityPanel productId={productId} />
       </div>
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setShowSettings(false)} />
+          <div className="relative bg-mc-bg-secondary border border-mc-border rounded-xl w-full max-w-lg mx-4 max-h-[85vh] overflow-y-auto">
+            <div className="sticky top-0 bg-mc-bg-secondary border-b border-mc-border px-5 py-4 flex items-center justify-between rounded-t-xl">
+              <h2 className="text-lg font-semibold text-mc-text">Product Settings</h2>
+              <button onClick={() => setShowSettings(false)} className="text-mc-text-secondary hover:text-mc-text">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {settingsError && (
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 text-sm text-red-400">{settingsError}</div>
+              )}
+
+              <div className="flex gap-3">
+                <div className="w-16">
+                  <label className="block text-xs font-medium text-mc-text-secondary uppercase tracking-wider mb-1">Icon</label>
+                  <input
+                    type="text"
+                    value={settingsForm.icon || ''}
+                    onChange={e => setSettingsForm(f => ({ ...f, icon: e.target.value }))}
+                    className="w-full bg-mc-bg border border-mc-border rounded-lg px-3 py-2 text-sm text-mc-text text-center text-xl focus:outline-none focus:border-mc-accent"
+                    maxLength={4}
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-mc-text-secondary uppercase tracking-wider mb-1">Name</label>
+                  <input
+                    type="text"
+                    value={settingsForm.name || ''}
+                    onChange={e => setSettingsForm(f => ({ ...f, name: e.target.value }))}
+                    className="w-full bg-mc-bg border border-mc-border rounded-lg px-3 py-2 text-sm text-mc-text focus:outline-none focus:border-mc-accent"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-mc-text-secondary uppercase tracking-wider mb-1">Description</label>
+                <textarea
+                  value={settingsForm.description || ''}
+                  onChange={e => setSettingsForm(f => ({ ...f, description: e.target.value }))}
+                  className="w-full bg-mc-bg border border-mc-border rounded-lg px-3 py-2 text-sm text-mc-text resize-none focus:outline-none focus:border-mc-accent"
+                  rows={2}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-mc-text-secondary uppercase tracking-wider mb-1">Repository URL</label>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    value={settingsForm.repo_url || ''}
+                    onChange={e => setSettingsForm(f => ({ ...f, repo_url: e.target.value }))}
+                    className="flex-1 bg-mc-bg border border-mc-border rounded-lg px-3 py-2 text-sm text-mc-text focus:outline-none focus:border-mc-accent"
+                    placeholder="https://github.com/org/repo"
+                  />
+                  {settingsForm.repo_url && (
+                    <a href={settingsForm.repo_url} target="_blank" rel="noopener noreferrer"
+                      className="px-3 flex items-center bg-mc-bg border border-mc-border rounded-lg text-mc-text-secondary hover:text-mc-text">
+                      <ExternalLink className="w-4 h-4" />
+                    </a>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-mc-text-secondary uppercase tracking-wider mb-1">Live URL</label>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    value={settingsForm.live_url || ''}
+                    onChange={e => setSettingsForm(f => ({ ...f, live_url: e.target.value }))}
+                    className="flex-1 bg-mc-bg border border-mc-border rounded-lg px-3 py-2 text-sm text-mc-text focus:outline-none focus:border-mc-accent"
+                    placeholder="https://yourproduct.com"
+                  />
+                  {settingsForm.live_url && (
+                    <a href={settingsForm.live_url} target="_blank" rel="noopener noreferrer"
+                      className="px-3 flex items-center bg-mc-bg border border-mc-border rounded-lg text-mc-text-secondary hover:text-mc-text">
+                      <ExternalLink className="w-4 h-4" />
+                    </a>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-mc-text-secondary uppercase tracking-wider mb-1">Default Branch</label>
+                  <input
+                    type="text"
+                    value={settingsForm.default_branch || ''}
+                    onChange={e => setSettingsForm(f => ({ ...f, default_branch: e.target.value }))}
+                    className="w-full bg-mc-bg border border-mc-border rounded-lg px-3 py-2 text-sm text-mc-text focus:outline-none focus:border-mc-accent"
+                    placeholder="main"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-mc-text-secondary uppercase tracking-wider mb-1">Build Mode</label>
+                  <select
+                    value={settingsForm.build_mode || 'plan_first'}
+                    onChange={e => setSettingsForm(f => ({ ...f, build_mode: e.target.value }))}
+                    className="w-full bg-mc-bg border border-mc-border rounded-lg px-3 py-2 text-sm text-mc-text focus:outline-none focus:border-mc-accent"
+                  >
+                    <option value="plan_first">Plan First</option>
+                    <option value="auto_build">Auto Build</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="sticky bottom-0 bg-mc-bg-secondary border-t border-mc-border px-5 py-4 flex items-center justify-end gap-3 rounded-b-xl">
+              <button
+                onClick={() => setShowSettings(false)}
+                className="min-h-9 px-4 rounded-lg text-sm text-mc-text-secondary hover:text-mc-text"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveSettings}
+                disabled={settingsSaving}
+                className={`min-h-9 px-4 rounded-lg flex items-center gap-2 text-sm font-medium ${
+                  settingsSaved
+                    ? 'bg-green-500/20 text-green-400'
+                    : 'bg-mc-accent text-white hover:bg-mc-accent/90'
+                }`}
+              >
+                {settingsSaving ? <Loader className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {settingsSaved ? 'Saved' : settingsSaving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

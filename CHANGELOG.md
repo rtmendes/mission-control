@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.0.1] - 2026-03-21
 
+### Added
+- **Product Settings Modal** — Gear icon (⚙️) in the product dashboard header opens an inline settings modal. Edit product name, description, repository URL, live URL, default branch, build mode, and icon without leaving the dashboard. Saves via the existing PATCH `/api/products/[id]` endpoint.
+- **Import README.md in New Product Wizard** — "Import from README" button on the Product Program step (step 2). Fetches the repository's README via GitHub API (public repos) or falls back to the local filesystem (`~/projects/<repo-name>/README.md` for private repos). Pre-populates the product program textarea. New API route: `POST /api/products/import-readme`.
+- **Auto-Generate Product Description** — "Auto-generate" button on the New Product basics step. Sends the repo URL and live URL to a new API endpoint that fetches README + website content, sends it to the LLM via OpenClaw Gateway's `/v1/chat/completions`, and returns a concise 1-2 sentence description. New API route: `POST /api/products/generate-description`.
+- **Improved Private Repo Warning** — Repo validation warning now explicitly tells users the repo may be private: *"Could not verify this repository — it may be private or may not exist. Private repos work fine, the agent will use local access."*
+
 ### Fixed
 - **Dispatch Hang on Stage Transitions** — All server-side dispatch fetch calls now have a 30-second `AbortSignal.timeout`. Previously, if the OpenClaw gateway was slow or unresponsive during testing/review/verification transitions, the PATCH request would hang indefinitely — potentially crashing the server. The timeout applies to all 10 dispatch call sites across the codebase. ([#84](https://github.com/crshdn/mission-control/issues/84))
 - **Stale OpenClaw Connection After Timeout** — Added `forceReconnect()` to the OpenClaw WebSocket client. When a dispatch fails (timeout or connection error), the client now tears down the stale WebSocket and clears all pending requests, so the next dispatch attempt gets a fresh connection instead of reusing a dead one.

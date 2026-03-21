@@ -43,7 +43,14 @@ I highly recommend getting Hetzner VPS to run this. <a href="https://hetzner.clo
 
 ## 🚀 What's New in v2.0.1
 
-### Patch: Stability & Community Contributions
+### New Features
+
+- **Product Settings Modal** — Gear icon (⚙️) in the product dashboard header. Edit name, description, repo URL, live URL, branch, build mode, and icon inline — no more manual DB updates.
+- **Import README in New Product Wizard** — One-click import of your repo's README.md to pre-populate the Product Program. Works with public repos (GitHub API) and private repos (local filesystem fallback).
+- **Auto-Generate Description** — AI generates a concise product description from your repo README and live site content via the OpenClaw Gateway.
+- **Smarter Private Repo Handling** — Repo validation now explicitly tells users a repo may be private instead of a generic "could not verify" warning.
+
+### Stability & Community Contributions
 
 - **Dispatch hang fix** — All dispatch calls now have a 30s timeout. Previously, a slow OpenClaw gateway could hang the server indefinitely during stage transitions (testing/review/verification). Failed dispatches also force-reconnect the WebSocket so retries start fresh.
 - **Fresh markdown in Agent Modal** — The modal now fetches live data from the API instead of showing stale store cache.
