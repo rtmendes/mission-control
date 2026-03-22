@@ -7,6 +7,8 @@ const GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL?.replace('ws://', 'http://'
 const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || '';
 const DEFAULT_MODEL = process.env.AUTOPILOT_MODEL || 'anthropic/claude-sonnet-4-6';
 const DEFAULT_TIMEOUT_MS = 300_000; // 5 minutes
+const MAX_RETRIES = 3;
+const RETRY_BASE_DELAY_MS = 5_000; // 5s, 10s, 20s exponential backoff
 
 export interface CompletionOptions {
   model?: string;
@@ -45,50 +47,75 @@ export async function complete(prompt: string, options: CompletionOptions = {}):
   }
   messages.push({ role: 'user', content: prompt });
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let lastError: Error | null = null;
 
-  try {
-    const response = await fetch(`${GATEWAY_URL}/v1/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GATEWAY_TOKEN}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        temperature,
-        max_tokens: maxTokens,
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`LLM completion failed (${response.status}): ${errorText}`);
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delay = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+      console.log(`[LLM] Retry ${attempt}/${MAX_RETRIES} after ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
 
-    const data = await response.json() as {
-      model: string;
-      choices: Array<{ message: { content: string } }>;
-      usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
-    };
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-    const content = data.choices?.[0]?.message?.content || '';
+    try {
+      const response = await fetch(`${GATEWAY_URL}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${GATEWAY_TOKEN}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature,
+          max_tokens: maxTokens,
+        }),
+        signal: controller.signal,
+      });
 
-    return {
-      content,
-      model: data.model || model,
-      usage: {
-        promptTokens: data.usage?.prompt_tokens || 0,
-        completionTokens: data.usage?.completion_tokens || 0,
-        totalTokens: data.usage?.total_tokens || 0,
-      },
-    };
-  } finally {
-    clearTimeout(timeout);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`LLM completion failed (${response.status}): ${errorText}`);
+      }
+
+      const data = await response.json() as {
+        model: string;
+        choices: Array<{ message: { content: string } }>;
+        usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+      };
+
+      const content = data.choices?.[0]?.message?.content || '';
+
+      return {
+        content,
+        model: data.model || model,
+        usage: {
+          promptTokens: data.usage?.prompt_tokens || 0,
+          completionTokens: data.usage?.completion_tokens || 0,
+          totalTokens: data.usage?.total_tokens || 0,
+        },
+      };
+    } catch (error) {
+      clearTimeout(timeout);
+      lastError = error instanceof Error ? error : new Error(String(error));
+      const isAbort = lastError.name === 'AbortError' || lastError.message.includes('aborted');
+      const isNetwork = lastError.message.includes('fetch failed') || lastError.message.includes('ECONNREFUSED') || lastError.message.includes('ECONNRESET');
+
+      if (isAbort || isNetwork) {
+        console.error(`[LLM] Attempt ${attempt + 1} failed (${isAbort ? 'timeout/abort' : 'network'}): ${lastError.message}`);
+        continue; // retry
+      }
+
+      // Non-retryable error (e.g. 400 bad request, parse error)
+      throw lastError;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
+
+  throw lastError || new Error('LLM completion failed after retries');
 }
 
 /**

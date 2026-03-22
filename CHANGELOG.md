@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.1.0] - 2026-03-21
+
+### Added
+- **Toast Notification System** — Global toast notifications surface errors, warnings, and status updates in real-time. Error toasts persist until dismissed and include a "Report this issue" action.
+- **Error Reporting via Email** — Users can report issues directly from error toasts or inline error messages. Clicking "Report this issue" opens the default email client pre-filled with error details and recent system logs (autopilot activity, failed cycles, task activities). Reports go to hello@autensa.com.
+- **Pending Ideas Badge** — Product cards on the Autopilot listing page (`/autopilot`) now show a red notification badge with the count of pending ideas awaiting review, similar to iPhone app icon badges.
+- **SSE Error Surfacing** — Autopilot errors and cost cap warnings broadcast via Server-Sent Events now appear as toast notifications in real-time, even if the user is on a different tab.
+- **`useErrorReport` Hook** — Reusable hook for triggering error toasts with one-click email reporting from any component.
+
+### Fixed
+- **Autopilot Pipeline Stops on Navigation** — The research-to-ideation pipeline was orchestrated entirely client-side. Navigating away from the product page killed the polling loop and ideation was never triggered. Pipeline orchestration now runs server-side: research auto-chains into ideation on completion. The UI is a status viewer, not the orchestrator. Multiple products can run pipelines concurrently.
+- **LLM Retry on Timeout/Network Errors** — The `complete()` function in `llm.ts` now retries up to 3 times with exponential backoff (5s, 10s, 20s) on `AbortError` and network failures (`ECONNREFUSED`, `ECONNRESET`, `fetch failed`). Non-retryable errors (4xx, parse errors) fail immediately. This fixes the "Roofs in a Box" ideation failures caused by OpenClaw WebSocket instability.
+
+### Improved
+- **Fire-and-Forget Run Now** — The "Run Now" button sends a single POST request and returns immediately. The server handles the full research → ideation pipeline. The UI polls for status every 5s to update the button state, but navigation no longer interrupts the pipeline.
+
+---
+
 ## [2.0.2] - 2026-03-21
 
 ### Added

@@ -8,12 +8,29 @@ import type { Product } from '@/lib/types';
 export default function AutopilotPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pendingCounts, setPendingCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     (async () => {
       try {
         const res = await fetch('/api/products');
-        if (res.ok) setProducts(await res.json());
+        if (res.ok) {
+          const prods: Product[] = await res.json();
+          setProducts(prods);
+
+          // Fetch pending idea counts in parallel
+          const counts: Record<string, number> = {};
+          await Promise.all(prods.map(async (p) => {
+            try {
+              const r = await fetch(`/api/products/${p.id}/ideas/pending`);
+              if (r.ok) {
+                const ideas = await r.json();
+                if (Array.isArray(ideas) && ideas.length > 0) counts[p.id] = ideas.length;
+              }
+            } catch { /* skip */ }
+          }));
+          setPendingCounts(counts);
+        }
       } catch (error) {
         console.error('Failed to load products:', error);
       } finally {
@@ -85,7 +102,14 @@ export default function AutopilotPage() {
               >
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3">
-                    <span className="text-2xl">{product.icon}</span>
+                    <span className="relative text-2xl">
+                      {product.icon}
+                      {pendingCounts[product.id] > 0 && (
+                        <span className="absolute -top-2 -right-2 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold leading-none px-1">
+                          {pendingCounts[product.id] > 99 ? '99+' : pendingCounts[product.id]}
+                        </span>
+                      )}
+                    </span>
                     <div>
                       <h3 className="font-semibold text-mc-text group-hover:text-mc-accent transition-colors">{product.name}</h3>
                       <span className={`text-xs px-2 py-0.5 rounded ${

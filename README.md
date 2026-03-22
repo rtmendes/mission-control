@@ -28,7 +28,7 @@ I highly recommend getting Hetzner VPS to run this. <a href="https://hetzner.clo
   <a href="https://missioncontrol.ghray.com"><strong>🎮 Live Demo</strong></a> •
   <a href="#-quick-start">Quick Start</a> •
   <a href="#-docker">Docker</a> •
-  <a href="#-whats-new-in-v201">What's New</a> •
+  <a href="#-whats-new-in-v210">What's New</a> •
   <a href="#-features">Features</a> •
   <a href="#-how-it-works">How It Works</a> •
   <a href="#-configuration">Configuration</a> •
@@ -41,14 +41,30 @@ I highly recommend getting Hetzner VPS to run this. <a href="https://hetzner.clo
 
 ---
 
-## 🚀 What's New in v2.0.2
+## 🚀 What's New in v2.1.0
 
-### New Features
+### Server-Side Autopilot Pipeline
+- **Run Now works in the background** — The research → ideation pipeline now runs entirely server-side. Click "Run Now", navigate away, close the tab — the pipeline keeps running. Multiple products run concurrently.
+- **LLM retry with backoff** — Timeout and network errors retry up to 3 times with exponential backoff (5s, 10s, 20s). Fixes ideation failures from flaky gateway connections.
+
+### Error Reporting & Notifications
+- **Toast notifications** — Errors, warnings, and status updates surface as toast notifications in real-time. Autopilot failures and cost cap warnings appear automatically via SSE.
+- **One-click error reporting** — Click "Report this issue" on any error toast to open your email client pre-filled with error details and system logs. Zero friction.
+
+### Pending Ideas Badge
+- **iPhone-style notification badges** — Product cards on `/autopilot` show a red badge with the count of pending ideas awaiting review.
+
+### Previous Releases
+
+<details>
+<summary>v2.0.2 — Session Key Prefix Support</summary>
 
 - **Session Key Prefix UI** — Agents now have a configurable `session_key_prefix` field in the Agent Modal for custom OpenClaw session routing. Dynamically created agents inherit the prefix from the master agent. ([@balaji-g42](https://github.com/balaji-g42))
 - **Session key sanitization** — Empty prefixes fall back to defaults; missing trailing colons are auto-appended to prevent malformed session keys.
+</details>
 
-### v2.0.1 Highlights
+<details>
+<summary>v2.0.1 — Dispatch Stability & Community Contributions</summary>
 
 - **Product Settings Modal** — Edit product config inline via the gear icon.
 - **Import README / Auto-Generate Description** — One-click README import and AI-generated descriptions in the New Product Wizard.
@@ -56,6 +72,7 @@ I highly recommend getting Hetzner VPS to run this. <a href="https://hetzner.clo
 - **Pre-migration database backups** — Automatic timestamped backups before migrations. ([@cgluttrell](https://github.com/cgluttrell))
 - **Migration 013 data guard** — Destructive migration skips databases with existing data. ([@cgluttrell](https://github.com/cgluttrell))
 - **Static device identity path** — Removes dynamic filesystem path parameter. ([@org4lap](https://github.com/org4lap))
+</details>
 
 ### v2.0 Highlights
 

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Rocket, Play, Layers, Lightbulb, BarChart3, FileText, Zap, Loader, Settings, X, Save, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Rocket, Play, Layers, Lightbulb, BarChart3, FileText, Zap, Loader, Settings, X, Save, ExternalLink, AlertTriangle } from 'lucide-react';
 import { SwipeDeck } from '@/components/autopilot/SwipeDeck';
 import { IdeasList } from '@/components/autopilot/IdeasList';
 import { ResearchReport } from '@/components/autopilot/ResearchReport';
@@ -12,6 +12,8 @@ import { ProductProgramEditor } from '@/components/autopilot/ProductProgramEdito
 import { MaybePool } from '@/components/autopilot/MaybePool';
 import { CostDashboard } from '@/components/costs/CostDashboard';
 import { ActivityPanel } from '@/components/autopilot/ActivityPanel';
+import { openErrorReport } from '@/components/ErrorReportModal';
+import { useToast } from '@/components/Toast';
 import type { Product } from '@/lib/types';
 
 type Tab = 'swipe' | 'ideas' | 'research' | 'build' | 'costs' | 'program' | 'maybe';
@@ -29,6 +31,7 @@ export default function ProductDashboardPage() {
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  const { addToast } = useToast();
 
   useEffect(() => {
     (async () => {
@@ -43,67 +46,78 @@ export default function ProductDashboardPage() {
     })();
   }, [productId]);
 
+  // Fire-and-forget: server handles research → ideation chaining
   const runNow = useCallback(async () => {
     if (pipeline !== 'idle') return;
     setPipeline('researching');
     setPipelineError(null);
 
     try {
-      // Step 1: Research
-      const researchRes = await fetch(`/api/products/${productId}/research/run`, { method: 'POST' });
+      const researchRes = await fetch(`/api/products/${productId}/research/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chainIdeation: true }),
+      });
       if (!researchRes.ok) {
         const err = await researchRes.json().catch(() => ({ error: 'Research failed' }));
         throw new Error(err.error || `Research failed (${researchRes.status})`);
       }
-      const { cycle_id } = await researchRes.json();
-
-      // Poll until research completes (check every 5s, max 10 min)
-      const maxWait = 600000;
-      const start = Date.now();
-      let researchDone = false;
-      while (Date.now() - start < maxWait) {
-        await new Promise(r => setTimeout(r, 5000));
-        const statusRes = await fetch(`/api/products/${productId}/research/cycles`);
-        if (statusRes.ok) {
-          const cycles = await statusRes.json();
-          const cycle = cycles.find((c: { id: string }) => c.id === cycle_id);
-          if (cycle?.status === 'completed') { researchDone = true; break; }
-          if (cycle?.status === 'failed') throw new Error(cycle.error_message || 'Research cycle failed');
-        }
-      }
-      if (!researchDone) throw new Error('Research timed out');
-
-      // Step 2: Ideation
-      setPipeline('ideating');
-      const ideationRes = await fetch(`/api/products/${productId}/ideation/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cycle_id }),
-      });
-      if (!ideationRes.ok) {
-        const err = await ideationRes.json().catch(() => ({ error: 'Ideation failed' }));
-        throw new Error(err.error || `Ideation failed (${ideationRes.status})`);
-      }
-
-      // Poll until ideation completes
-      const { ideation_id } = await ideationRes.json();
-      const ideaStart = Date.now();
-      while (Date.now() - ideaStart < maxWait) {
-        await new Promise(r => setTimeout(r, 5000));
-        const statusRes = await fetch(`/api/products/${productId}/ideation/cycles`);
-        if (statusRes.ok) {
-          const cycles = await statusRes.json();
-          const cycle = cycles.find((c: { id: string }) => c.id === ideation_id);
-          if (cycle?.status === 'completed') { setPipeline('done'); return; }
-          if (cycle?.status === 'failed') throw new Error(cycle.error_message || 'Ideation cycle failed');
-        }
-      }
-      throw new Error('Ideation timed out');
     } catch (err) {
-      setPipelineError((err as Error).message);
+      const errMsg = (err as Error).message;
+      setPipelineError(errMsg);
       setPipeline('error');
+      addToast({
+        type: 'error',
+        title: 'Pipeline failed',
+        message: errMsg,
+        duration: 0,
+        action: {
+          label: 'Report this issue',
+          onClick: () => openErrorReport({ errorType: 'autopilot_pipeline', errorMessage: errMsg, productId }),
+        },
+      });
     }
-  }, [productId, pipeline]);
+  }, [productId, pipeline, addToast]);
+
+  // Poll server for pipeline status so UI reflects progress even after navigation
+  useEffect(() => {
+    if (pipeline !== 'researching' && pipeline !== 'ideating') return;
+
+    const interval = setInterval(async () => {
+      try {
+        // Check latest research cycle
+        const resRes = await fetch(`/api/products/${productId}/research/cycles`);
+        if (!resRes.ok) return;
+        const resCycles = await resRes.json();
+        const latestResearch = resCycles[0];
+
+        if (latestResearch?.status === 'failed') {
+          setPipelineError(latestResearch.error_message || 'Research failed');
+          setPipeline('error');
+          return;
+        }
+
+        if (latestResearch?.status === 'completed') {
+          // Research done — check ideation
+          const ideaRes = await fetch(`/api/products/${productId}/ideation/cycles`);
+          if (!ideaRes.ok) return;
+          const ideaCycles = await ideaRes.json();
+          const latestIdeation = ideaCycles[0];
+
+          if (!latestIdeation || latestIdeation.status === 'running') {
+            setPipeline('ideating');
+          } else if (latestIdeation.status === 'completed') {
+            setPipeline('done');
+          } else if (latestIdeation.status === 'failed') {
+            setPipelineError(latestIdeation.error_message || 'Ideation failed');
+            setPipeline('error');
+          }
+        }
+      } catch { /* ignore poll errors */ }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [pipeline, productId]);
 
   // Auto-reset "done" state after 3 seconds so button is clickable again
   useEffect(() => {
@@ -229,9 +243,19 @@ export default function ProductDashboardPage() {
               )}
             </button>
             {pipelineError && (
-              <span className="text-xs text-red-400 max-w-48 truncate" title={pipelineError}>
-                {pipelineError}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-red-400 max-w-48 truncate" title={pipelineError}>
+                  {pipelineError}
+                </span>
+                <button
+                  onClick={() => openErrorReport({ errorType: 'autopilot_pipeline', errorMessage: pipelineError, productId })}
+                  className="flex items-center gap-1 text-xs text-amber-400 hover:text-amber-300 transition-colors"
+                  title="Report this issue"
+                >
+                  <AlertTriangle size={12} />
+                  Report
+                </button>
+              </div>
             )}
             <Link
               href={`/autopilot/${productId}/swipe`}
@@ -422,6 +446,7 @@ export default function ProductDashboardPage() {
           </div>
         </div>
       )}
+
     </div>
   );
 }

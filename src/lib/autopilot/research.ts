@@ -3,6 +3,7 @@ import { queryOne, queryAll, run } from '@/lib/db';
 import { broadcast } from '@/lib/events';
 import { recordCostEvent } from '@/lib/costs/tracker';
 import { emitAutopilotActivity } from './activity';
+import { runIdeationCycle } from './ideation';
 import { completeJSON } from './llm';
 import type { Product, ResearchCycle } from '@/lib/types';
 
@@ -47,7 +48,7 @@ ${learnedPreferences ? `## Learned Preferences\n${learnedPreferences}` : ''}`;
  * Run a research cycle for a product.
  * Uses the Gateway's /v1/chat/completions endpoint for stateless prompt→response.
  */
-export async function runResearchCycle(productId: string, existingCycleId?: string): Promise<string> {
+export async function runResearchCycle(productId: string, existingCycleId?: string, chainIdeation = false): Promise<string> {
   const product = queryOne<Product>('SELECT * FROM products WHERE id = ?', [productId]);
   if (!product) throw new Error(`Product ${productId} not found`);
 
@@ -150,6 +151,16 @@ export async function runResearchCycle(productId: string, existingCycleId?: stri
       broadcast({ type: 'research_phase', payload: { productId, cycleId, phase: 'completed' } });
 
       console.log(`[Research] Cycle ${cycleId} completed successfully (tokens: ${usage.totalTokens})`);
+
+      // Auto-chain: kick off ideation using this research cycle
+      if (chainIdeation) {
+        try {
+          const ideationId = await runIdeationCycle(productId, cycleId);
+          console.log(`[Research] Auto-chained ideation cycle ${ideationId} for product ${productId}`);
+        } catch (ideaErr) {
+          console.error(`[Research] Auto-chain ideation failed for product ${productId}:`, ideaErr);
+        }
+      }
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       run(
