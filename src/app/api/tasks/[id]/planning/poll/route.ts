@@ -32,9 +32,17 @@ async function handlePlanningCompletion(taskId: string, parsed: any, messages: a
     const allowDynamicAgents = process.env.ALLOW_DYNAMIC_AGENTS !== 'false';
 
     if (allowDynamicAgents && parsed.agents && parsed.agents.length > 0) {
+      // Get the master agent's session_key_prefix to use for new agents
+      const task = db.prepare('SELECT workspace_id FROM tasks WHERE id = ?').get(taskId) as { workspace_id: string } | undefined;
+      const masterAgent = task ? db.prepare(
+        `SELECT session_key_prefix FROM agents WHERE is_master = 1 AND workspace_id = ? ORDER BY created_at ASC LIMIT 1`
+      ).get(task.workspace_id) as { session_key_prefix?: string } | undefined : undefined;
+      
+      const sessionKeyPrefix = masterAgent?.session_key_prefix || 'agent:main:';
+
       const insertAgent = db.prepare(`
-        INSERT INTO agents (id, workspace_id, name, role, description, avatar_emoji, status, soul_md, created_at, updated_at)
-        VALUES (?, (SELECT workspace_id FROM tasks WHERE id = ?), ?, ?, ?, ?, 'standby', ?, datetime('now'), datetime('now'))
+        INSERT INTO agents (id, workspace_id, name, role, description, avatar_emoji, status, soul_md, session_key_prefix, created_at, updated_at)
+        VALUES (?, (SELECT workspace_id FROM tasks WHERE id = ?), ?, ?, ?, ?, 'standby', ?, ?, datetime('now'), datetime('now'))
       `);
 
       for (const agent of parsed.agents) {
@@ -48,7 +56,8 @@ async function handlePlanningCompletion(taskId: string, parsed: any, messages: a
           agent.role,
           agent.instructions || '',
           agent.avatar_emoji || '🤖',
-          agent.soul_md || ''
+          agent.soul_md || '',
+          sessionKeyPrefix
         );
       }
     } else if (!allowDynamicAgents && parsed.agents && parsed.agents.length > 0) {

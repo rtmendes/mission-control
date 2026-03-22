@@ -33,6 +33,7 @@ export function AgentModal({ agent, onClose, workspaceId, onAgentCreated }: Agen
     user_md: agent?.user_md || '',
     agents_md: agent?.agents_md || '',
     model: agent?.model || '',
+    session_key_prefix: agent?.session_key_prefix || '',
   });
 
   // Fetch fresh agent data when modal opens (store data may be stale)
@@ -289,6 +290,21 @@ export function AgentModal({ agent, onClose, workspaceId, onAgentCreated }: Agen
                 )}
                 <p className="text-xs text-mc-text-secondary mt-1">
                   AI model used by this agent. Leave empty to use OpenClaw default.
+                </p>
+              </div>
+
+              {/* Session Key Prefix */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Session Key Prefix</label>
+                <input
+                  type="text"
+                  value={form.session_key_prefix}
+                  onChange={(e) => setForm({ ...form, session_key_prefix: e.target.value })}
+                  className="w-full min-h-11 bg-mc-bg border border-mc-border rounded px-3 py-2 text-sm focus:outline-none focus:border-mc-accent"
+                  placeholder="agent:main:"
+                />
+                <p className="text-xs text-mc-text-secondary mt-1">
+                  OpenClaw session routing prefix. Defaults to "agent:main:" if not set.
                 </p>
               </div>
             </div>

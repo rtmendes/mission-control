@@ -323,6 +323,7 @@ export interface CreateAgentRequest {
   user_md?: string;
   agents_md?: string;
   model?: string;
+  session_key_prefix?: string;
 }
 
 export interface UpdateAgentRequest extends Partial<CreateAgentRequest> {

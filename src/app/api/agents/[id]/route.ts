@@ -89,6 +89,10 @@ export async function PATCH(
       updates.push('model = ?');
       values.push(body.model);
     }
+    if (body.session_key_prefix !== undefined) {
+      updates.push('session_key_prefix = ?');
+      values.push(body.session_key_prefix);
+    }
 
     if (updates.length === 0) {
       return NextResponse.json({ error: 'No updates provided' }, { status: 400 });
