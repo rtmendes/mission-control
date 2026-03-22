@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Send, Loader, AtSign } from 'lucide-react';
+import { Send, Loader } from 'lucide-react';
 
 interface ChatAgent {
   id: string;

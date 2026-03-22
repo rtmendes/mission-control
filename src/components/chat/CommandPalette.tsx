@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
-  Command, Pause, Play, RotateCcw, Save, ArrowRight, MessageSquare,
-  Trash2, Download, Search, Zap, RefreshCw
+  Command, Pause, Play, Save, ArrowRight, MessageSquare,
+  Search, RefreshCw
 } from 'lucide-react';
 
 export interface PaletteCommand {

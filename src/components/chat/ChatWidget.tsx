@@ -68,6 +68,13 @@ export function ChatWidget() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, selectedTaskId]);
 
+  // Listen for chat:toggle custom event (from CommandPalette)
+  useEffect(() => {
+    const handleToggle = () => setIsOpen(prev => !prev);
+    window.addEventListener('chat:toggle', handleToggle);
+    return () => window.removeEventListener('chat:toggle', handleToggle);
+  }, []);
+
   const handleSelectTask = (taskId: string, title: string) => {
     setSelectedTaskId(taskId);
     setSelectedTaskTitle(title);

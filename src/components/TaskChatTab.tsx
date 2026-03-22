@@ -163,6 +163,9 @@ export function TaskChatTab({ taskId }: TaskChatTabProps) {
           onSend={handleSend}
           sending={sending}
           placeholder="Message the agent... (@ to mention, / for commands)"
+          onSlashCommand={(cmd) => {
+            window.dispatchEvent(new CustomEvent('commandpalette:open', { detail: { filter: cmd, taskId } }));
+          }}
         />
       </div>
     </div>
