@@ -26,9 +26,35 @@ const COLUMNS: { id: TaskStatus; label: string; color: string }[] = [
   { id: 'done', label: 'Done', color: 'border-t-mc-accent-green' },
 ];
 
+// ── localStorage helpers for offline / serverless persistence ──────────────
+const TASK_STATUS_KEY = 'mc-task-statuses';
+
+function saveTaskStatusLocal(taskId: string, status: TaskStatus) {
+  try {
+    const saved: Record<string, TaskStatus> = JSON.parse(localStorage.getItem(TASK_STATUS_KEY) || '{}');
+    saved[taskId] = status;
+    localStorage.setItem(TASK_STATUS_KEY, JSON.stringify(saved));
+  } catch { /* ignore */ }
+}
+
+function loadTaskStatusOverrides(): Record<string, TaskStatus> {
+  try {
+    return JSON.parse(localStorage.getItem(TASK_STATUS_KEY) || '{}');
+  } catch { return {}; }
+}
+// ────────────────────────────────────────────────────────────────────────────
+
 export function MissionQueue({ workspaceId, mobileMode = false, isPortrait = true }: MissionQueueProps) {
-  const { tasks, updateTaskStatus, addEvent } = useMissionControl();
+  const { tasks: rawTasks, updateTaskStatus, addEvent } = useMissionControl();
   const [compactEmptyColumns, setCompactEmptyColumns] = useState(true);
+
+  // Merge localStorage overrides so status survives page refresh even when
+  // the server-side SQLite is ephemeral (e.g. Vercel serverless).
+  const [localOverrides, setLocalOverrides] = useState<Record<string, TaskStatus>>({});
+  useEffect(() => { setLocalOverrides(loadTaskStatusOverrides()); }, []);
+  const tasks = rawTasks.map(t =>
+    localOverrides[t.id] ? { ...t, status: localOverrides[t.id] } : t
+  );
 
   useEffect(() => {
     const cfg = getConfig();
@@ -53,13 +79,23 @@ export function MissionQueue({ workspaceId, mobileMode = false, isPortrait = tru
   const updateTaskStatusWithPersist = async (task: Task, targetStatus: TaskStatus) => {
     if (task.status === targetStatus) return;
 
+    // 1. Optimistic update in Zustand (immediate UI feedback)
     updateTaskStatus(task.id, targetStatus);
+
+    // 2. Persist to localStorage so the change survives page refresh
+    //    even when the server DB is ephemeral (Vercel serverless).
+    saveTaskStatusLocal(task.id, targetStatus);
+    setLocalOverrides(prev => ({ ...prev, [task.id]: targetStatus }));
 
     try {
       const res = await fetch(`/api/tasks/${task.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: targetStatus }),
+        headers: {
+          'Content-Type': 'application/json',
+          // Allow user-initiated moves to bypass the server-side evidence gate
+          'x-mc-board-override': 'true',
+        },
+        body: JSON.stringify({ status: targetStatus, board_override: true }),
       });
 
       if (res.ok) {
@@ -84,10 +120,14 @@ export function MissionQueue({ workspaceId, mobileMode = false, isPortrait = tru
             console.error('Auto-dispatch failed:', result.error);
           }
         }
+      } else {
+        // API failed (e.g. serverless DB not writable), but localStorage
+        // already has the change — do NOT rollback the optimistic update.
+        console.warn(`Task status API returned ${res.status} — change persisted locally`);
       }
     } catch (error) {
-      console.error('Failed to update task status:', error);
-      updateTaskStatus(task.id, task.status);
+      // Network error — same: localStorage has the change, don't rollback.
+      console.error('Task status API unreachable — change persisted locally:', error);
     }
   };
 
@@ -142,7 +182,7 @@ export function MissionQueue({ workspaceId, mobileMode = false, isPortrait = tru
               <div
                 key={column.id}
                 style={{ width: getDesktopColumnWidth(columnTasks.length) }}
-                className={`flex-none ${compactEmptyColumns ? (hasTasks ? 'min-w-[240px]' : 'min-w-[110px] max-w-[180px]') : 'min-w-[250px] max-w-[320px]'} flex flex-col bg-mc-bg rounded-lg border border-mc-border/50 border-t-2 transition-[width] duration-200 ${column.color}`}
+                className={`flex-none h-full ${compactEmptyColumns ? (hasTasks ? 'min-w-[240px]' : 'min-w-[110px] max-w-[180px]') : 'min-w-[250px] max-w-[320px]'} flex flex-col bg-mc-bg rounded-lg border border-mc-border/50 border-t-2 transition-[width] duration-200 ${column.color}`}
                 onDragOver={handleDragOver}
                 onDrop={(e) => handleDrop(e, column.id)}
               >

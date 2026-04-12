@@ -3,11 +3,12 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ChevronLeft, ListTodo, Users, Activity, Settings as SettingsIcon, ExternalLink, Home, BarChart3 } from 'lucide-react';
+import { ChevronLeft, ListTodo, Users, Activity, Settings as SettingsIcon, ExternalLink, Home, BarChart3, LayoutGrid, Map } from 'lucide-react';
 import { Header } from '@/components/Header';
 import { AgentsSidebar } from '@/components/AgentsSidebar';
 import { MissionQueue } from '@/components/MissionQueue';
 import { LiveFeed } from '@/components/LiveFeed';
+import { CanvasView } from '@/components/CanvasView';
 import { SSEDebugPanel } from '@/components/SSEDebugPanel';
 import { useMissionControl } from '@/lib/store';
 import { useSSE } from '@/hooks/useSSE';
@@ -15,6 +16,7 @@ import { debug } from '@/lib/debug';
 import type { Task, Workspace } from '@/lib/types';
 
 type MobileTab = 'queue' | 'agents' | 'feed' | 'settings';
+type ViewMode = 'kanban' | 'canvas';
 
 export default function WorkspacePage() {
   const params = useParams();
@@ -23,6 +25,7 @@ export default function WorkspacePage() {
   const { setAgents, setTasks, setEvents, setIsOnline, setIsLoading, isLoading } = useMissionControl();
 
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('kanban');
   const [notFound, setNotFound] = useState(false);
   const [mobileTab, setMobileTab] = useState<MobileTab>('queue');
   const [isPortrait, setIsPortrait] = useState(true);
@@ -208,10 +211,42 @@ export default function WorkspacePage() {
     <div className="h-screen flex flex-col bg-mc-bg overflow-hidden">
       <Header workspace={workspace} isPortrait={isPortrait} />
 
+      {/* View-mode toggle — desktop only */}
+      <div className="hidden lg:flex items-center gap-1 px-3 py-1.5 border-b border-mc-border bg-mc-bg-secondary">
+        <button
+          onClick={() => setViewMode('kanban')}
+          className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-colors ${
+            viewMode === 'kanban'
+              ? 'bg-mc-accent text-mc-bg'
+              : 'text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary'
+          }`}
+        >
+          <LayoutGrid className="w-3.5 h-3.5" />
+          Kanban
+        </button>
+        <button
+          onClick={() => setViewMode('canvas')}
+          className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-colors ${
+            viewMode === 'canvas'
+              ? 'bg-mc-accent text-mc-bg'
+              : 'text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary'
+          }`}
+        >
+          <Map className="w-3.5 h-3.5" />
+          Canvas
+        </button>
+      </div>
+
       <div className="hidden lg:flex flex-1 overflow-hidden">
-        <AgentsSidebar workspaceId={workspace.id} />
-        <MissionQueue workspaceId={workspace.id} />
-        <LiveFeed />
+        {viewMode === 'canvas' ? (
+          <CanvasView workspaceId={workspace.id} />
+        ) : (
+          <>
+            <AgentsSidebar workspaceId={workspace.id} />
+            <MissionQueue workspaceId={workspace.id} />
+            <LiveFeed />
+          </>
+        )}
       </div>
 
       <div

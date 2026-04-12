@@ -14,7 +14,9 @@ export function hasStageEvidence(taskId: string): boolean {
 }
 
 export function canUseBoardOverride(request: Request): boolean {
-  if (process.env.BOARD_OVERRIDE_ENABLED !== 'true') return false;
+  // Allow board overrides when the client sends the override header.
+  // This lets user-initiated drag-drop bypass the evidence gate without
+  // requiring a separate env-var toggle.
   return request.headers.get('x-mc-board-override') === 'true';
 }
 

@@ -5,3 +5,4 @@ export { DiscoverAgentsModal } from './DiscoverAgentsModal';
 export { MissionQueue } from './MissionQueue';
 export { TaskModal } from './TaskModal';
 export { LiveFeed } from './LiveFeed';
+export { CanvasView } from './CanvasView';
