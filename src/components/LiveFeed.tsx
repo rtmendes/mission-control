@@ -97,6 +97,12 @@ function EventItem({ event }: { event: Event }) {
         return '🔔';
       case 'system':
         return '⚙️';
+      case 'task_dispatched':
+        return '🚀';
+      case 'convoy_created':
+        return '🚚';
+      case 'convoy_completed':
+        return '🏁';
       default:
         return '📌';
     }

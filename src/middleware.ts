@@ -79,6 +79,11 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Health check endpoints — bypass token auth (monitored externally)
+  if (pathname === '/api/health' || pathname.startsWith('/api/health/')) {
+    return NextResponse.next();
+  }
+
   // Webhook routes use their own HMAC signature validation — bypass token auth
   if (pathname.startsWith('/api/webhooks/')) {
     return NextResponse.next();

@@ -3,9 +3,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Plus, ChevronRight, ChevronLeft, Zap, ZapOff, Loader2, Search } from 'lucide-react';
 import { useMissionControl } from '@/lib/store';
-import type { Agent, AgentStatus, OpenClawSession } from '@/lib/types';
+import type { Agent, AgentStatus, AgentHealthState, OpenClawSession } from '@/lib/types';
 import { AgentModal } from './AgentModal';
 import { DiscoverAgentsModal } from './DiscoverAgentsModal';
+import { HealthIndicator } from './HealthIndicator';
 
 type FilterTab = 'all' | 'working' | 'standby';
 
@@ -23,6 +24,7 @@ export function AgentsSidebar({ workspaceId, mobileMode = false, isPortrait = tr
   const [showDiscoverModal, setShowDiscoverModal] = useState(false);
   const [connectingAgentId, setConnectingAgentId] = useState<string | null>(null);
   const [activeSubAgents, setActiveSubAgents] = useState(0);
+  const [agentHealth, setAgentHealth] = useState<Record<string, AgentHealthState>>({});
   const [isMinimized, setIsMinimized] = useState(false);
 
   const effectiveMinimized = mobileMode ? false : isMinimized;
@@ -65,6 +67,27 @@ export function AgentsSidebar({ workspaceId, mobileMode = false, isPortrait = tr
 
     loadSubAgentCount();
     const interval = setInterval(loadSubAgentCount, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Poll agent health
+  useEffect(() => {
+    const loadHealth = async () => {
+      try {
+        const res = await fetch('/api/agents/health');
+        if (res.ok) {
+          const data = await res.json();
+          const healthMap: Record<string, AgentHealthState> = {};
+          for (const h of data) {
+            healthMap[h.agent_id] = h.health_state;
+          }
+          setAgentHealth(healthMap);
+        }
+      } catch {}
+    };
+
+    loadHealth();
+    const interval = setInterval(loadHealth, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -227,7 +250,12 @@ export function AgentsSidebar({ workspaceId, mobileMode = false, isPortrait = tr
                   </div>
                 </div>
 
-                <span className={`text-xs px-2 py-0.5 rounded uppercase ${getStatusBadge(agent.status)}`}>{agent.status}</span>
+                <div className="flex items-center gap-1.5">
+                  {agentHealth[agent.id] && agentHealth[agent.id] !== 'idle' && (
+                    <HealthIndicator state={agentHealth[agent.id]} size="sm" />
+                  )}
+                  <span className={`text-xs px-2 py-0.5 rounded uppercase ${getStatusBadge(agent.status)}`}>{agent.status}</span>
+                </div>
               </button>
 
               {!!agent.is_master && (

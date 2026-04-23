@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Plus, ArrowRight, Folder, Users, CheckSquare, Trash2, AlertTriangle, Activity } from 'lucide-react';
+import { Plus, ArrowRight, Folder, Users, CheckSquare, Trash2, AlertTriangle, Activity, Rocket } from 'lucide-react';
 import Link from 'next/link';
 import type { WorkspaceStats } from '@/lib/types';
 
@@ -51,7 +51,14 @@ export function WorkspaceDashboard() {
             </div>
             <div className="flex items-center gap-2">
               <Link
-                href={workspaces.length > 0 ? `/workspace/${workspaces[0].slug}/activity` : '/workspace/default/activity'}
+                href="/autopilot"
+                className="min-h-11 px-4 rounded-lg border border-mc-border bg-mc-bg text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary flex items-center gap-2 text-sm"
+              >
+                <Rocket className="w-4 h-4" />
+                Autopilot
+              </Link>
+              <Link
+                href="/activity"
                 className="min-h-11 px-4 rounded-lg border border-mc-border bg-mc-bg text-mc-text-secondary hover:text-mc-text hover:bg-mc-bg-tertiary flex items-center gap-2 text-sm"
               >
                 <Activity className="w-4 h-4" />
@@ -196,6 +203,12 @@ function WorkspaceCard({ workspace, onDelete }: { workspace: WorkspaceStats; onD
             <Users className="w-4 h-4" />
             <span>{workspace.agentCount} agents</span>
           </div>
+          {(workspace.taskCounts.convoy_active || 0) > 0 && (
+            <div className="flex items-center gap-1 text-cyan-400">
+              <span>🚚</span>
+              <span>{workspace.taskCounts.convoy_active} convoy{workspace.taskCounts.convoy_active > 1 ? 's' : ''}</span>
+            </div>
+          )}
         </div>
       </div>
     </Link>

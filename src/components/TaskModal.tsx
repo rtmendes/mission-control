@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { X, Save, Trash2, Activity, Package, Bot, ClipboardList, Plus, Users, ImageIcon } from 'lucide-react';
+import { X, Save, Trash2, Activity, Package, Bot, ClipboardList, Plus, Users, ImageIcon, Truck, Radio, MessageSquare, ExternalLink, HardDrive } from 'lucide-react';
 import { useMissionControl } from '@/lib/store';
 import { triggerAutoDispatch, shouldTriggerAutoDispatch } from '@/lib/auto-dispatch';
 import { ActivityLog } from './ActivityLog';
@@ -11,9 +11,13 @@ import { PlanningTab } from './PlanningTab';
 import { TeamTab } from './TeamTab';
 import { AgentModal } from './AgentModal';
 import { TaskImages } from './TaskImages';
+import { ConvoyTab } from './ConvoyTab';
+import { AgentLiveTab } from './AgentLiveTab';
+import { TaskChatTab } from './TaskChatTab';
+import { WorkspaceTab } from './WorkspaceTab';
 import type { Task, TaskPriority, TaskStatus } from '@/lib/types';
 
-type TabType = 'overview' | 'planning' | 'team' | 'activity' | 'deliverables' | 'images' | 'sessions';
+type TabType = 'overview' | 'planning' | 'convoy' | 'team' | 'activity' | 'deliverables' | 'images' | 'sessions' | 'workspace' | 'agent-live' | 'chat';
 
 interface TaskModalProps {
   task?: Task;
@@ -26,8 +30,10 @@ export function TaskModal({ task, onClose, workspaceId }: TaskModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAgentModal, setShowAgentModal] = useState(false);
   const [usePlanningMode, setUsePlanningMode] = useState(false);
-  // Auto-switch to planning tab if task is in planning status
-  const [activeTab, setActiveTab] = useState<TabType>(task?.status === 'planning' ? 'planning' : 'overview');
+  // Auto-switch to relevant tab based on task status
+  const [activeTab, setActiveTab] = useState<TabType>(
+    task?.status === 'planning' ? 'planning' : task?.status === 'convoy_active' ? 'convoy' : 'overview'
+  );
 
   // Stable callback for when spec is locked - use window.location.reload() to refresh data
   const handleSpecLocked = useCallback(() => {
@@ -58,6 +64,8 @@ export function TaskModal({ task, onClose, workspaceId }: TaskModalProps) {
   };
 
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent, keepOpen = false) => {
     e.preventDefault();
@@ -166,6 +174,8 @@ export function TaskModal({ task, onClose, workspaceId }: TaskModalProps) {
   const handleDelete = async () => {
     if (!task || !confirm(`Delete "${task.title}"?`)) return;
 
+    setIsDeleting(true);
+    setDeleteError(null);
     try {
       const res = await fetch(`/api/tasks/${task.id}`, { method: 'DELETE' });
       if (res.ok) {
@@ -173,9 +183,15 @@ export function TaskModal({ task, onClose, workspaceId }: TaskModalProps) {
           tasks: state.tasks.filter((t) => t.id !== task.id),
         }));
         onClose();
+      } else {
+        const errData = await res.json().catch(() => ({ error: 'Unknown error' }));
+        setDeleteError(errData.error || `Delete failed (${res.status})`);
       }
     } catch (error) {
       console.error('Failed to delete task:', error);
+      setDeleteError(error instanceof Error ? error.message : 'Network error — please try again');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -184,11 +200,22 @@ export function TaskModal({ task, onClose, workspaceId }: TaskModalProps) {
   const tabs = [
     { id: 'overview' as TabType, label: 'Overview', icon: null },
     { id: 'planning' as TabType, label: 'Planning', icon: <ClipboardList className="w-4 h-4" /> },
+    { id: 'convoy' as TabType, label: 'Convoy', icon: <Truck className="w-4 h-4" /> },
     { id: 'team' as TabType, label: 'Team', icon: <Users className="w-4 h-4" /> },
     { id: 'activity' as TabType, label: 'Activity', icon: <Activity className="w-4 h-4" /> },
     { id: 'deliverables' as TabType, label: 'Deliverables', icon: <Package className="w-4 h-4" /> },
     { id: 'images' as TabType, label: 'Images', icon: <ImageIcon className="w-4 h-4" /> },
     { id: 'sessions' as TabType, label: 'Sessions', icon: <Bot className="w-4 h-4" /> },
+    // Workspace tab — shown when task has workspace isolation
+    ...(task?.workspace_path ? [{ id: 'workspace' as TabType, label: 'Workspace', icon: <HardDrive className="w-4 h-4" /> }] : []),
+    // Chat is always available — messages dispatch the agent if needed
+    { id: 'chat' as TabType, label: 'Chat', icon: <MessageSquare className="w-4 h-4" /> },
+    // Agent Live only shown when agent is active
+    ...(task && ['in_progress', 'convoy_active', 'testing', 'verification'].includes(task.status)
+      ? [
+          { id: 'agent-live' as TabType, label: 'Agent Live', icon: <Radio className="w-4 h-4" /> },
+        ]
+      : []),
   ];
 
   return (
@@ -337,6 +364,36 @@ export function TaskModal({ task, onClose, workspaceId }: TaskModalProps) {
             </div>
           </div>
 
+          {/* Pull Request section */}
+          {task?.pr_url && (
+            <div className="p-3 bg-mc-bg rounded-lg border border-mc-border">
+              <h4 className="text-sm font-medium text-mc-text mb-2 flex items-center gap-2">
+                <ExternalLink className="w-4 h-4" />
+                Pull Request
+              </h4>
+              <div className="flex items-center gap-3">
+                <a
+                  href={task.pr_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-mc-accent hover:underline break-all"
+                >
+                  {task.pr_url}
+                </a>
+                {task.pr_status && (
+                  <span className={`shrink-0 text-xs px-2 py-1 rounded font-medium ${
+                    task.pr_status === 'open' ? 'bg-blue-500/20 text-blue-400' :
+                    task.pr_status === 'merged' ? 'bg-green-500/20 text-green-400' :
+                    task.pr_status === 'closed' ? 'bg-red-500/20 text-red-400' :
+                    'bg-gray-500/20 text-gray-400'
+                  }`}>
+                    {task.pr_status}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
           {saveError && (
             <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-md">
               <span className="text-sm text-red-400">{saveError}</span>
@@ -351,6 +408,11 @@ export function TaskModal({ task, onClose, workspaceId }: TaskModalProps) {
               taskId={task.id}
               onSpecLocked={handleSpecLocked}
             />
+          )}
+
+          {/* Convoy Tab */}
+          {activeTab === 'convoy' && task && (
+            <ConvoyTab taskId={task.id} taskTitle={task.title} taskStatus={task.status} />
           )}
 
           {/* Team Tab */}
@@ -377,22 +439,43 @@ export function TaskModal({ task, onClose, workspaceId }: TaskModalProps) {
           {activeTab === 'sessions' && task && (
             <SessionsList taskId={task.id} />
           )}
+
+          {/* Agent Live Tab */}
+          {activeTab === 'agent-live' && task && (
+            <AgentLiveTab taskId={task.id} />
+          )}
+
+          {/* Chat Tab */}
+          {/* Workspace Tab */}
+          {activeTab === 'workspace' && task && (
+            <WorkspaceTab taskId={task.id} taskStatus={task.status} />
+          )}
+
+          {activeTab === 'chat' && task && (
+            <TaskChatTab taskId={task.id} />
+          )}
         </div>
 
         {/* Footer - only show on overview tab */}
         {activeTab === 'overview' && (
           <div className="flex items-center justify-between p-4 border-t border-mc-border flex-shrink-0">
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
               {task && (
                 <>
                   <button
                     type="button"
                     onClick={handleDelete}
-                    className="min-h-11 flex items-center gap-2 px-3 py-2 text-mc-accent-red hover:bg-mc-accent-red/10 rounded text-sm"
+                    disabled={isDeleting}
+                    className="min-h-11 flex items-center gap-2 px-3 py-2 text-mc-accent-red hover:bg-mc-accent-red/10 rounded text-sm disabled:opacity-50"
                   >
                     <Trash2 className="w-4 h-4" />
-                    Delete
+                    {isDeleting ? 'Deleting...' : 'Delete'}
                   </button>
+                  {deleteError && (
+                    <span className="text-xs text-red-400 max-w-48 truncate" title={deleteError}>
+                      {deleteError}
+                    </span>
+                  )}
                 </>
               )}
             </div>
