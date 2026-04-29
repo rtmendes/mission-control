@@ -1595,6 +1595,36 @@ const migrations: Migration[] = [
 
       console.log('[Migration 028] product_skills and skill_reports tables created');
     }
+  },
+  {
+    id: '029',
+    name: 'add_repo_readiness_checks',
+    up: (db) => {
+      console.log('[Migration 029] Adding repo_readiness_checks table...');
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS repo_readiness_checks (
+          id TEXT PRIMARY KEY,
+          product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+          check_id TEXT NOT NULL,
+          category TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('pass', 'warning', 'fail', 'info')),
+          severity TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'blocking')),
+          title TEXT NOT NULL,
+          message TEXT NOT NULL,
+          details TEXT,
+          actions TEXT,
+          last_checked_at TEXT NOT NULL,
+          resolved_at TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now')),
+          UNIQUE(product_id, check_id)
+        )
+      `);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_repo_readiness_product ON repo_readiness_checks(product_id, status, severity)`);
+
+      console.log('[Migration 029] repo_readiness_checks table created');
+    }
   }
 ];
 

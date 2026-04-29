@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.5.1] - 2026-04-29
+
+### Added
+- **Repo Setup for Autopilot products** — Product dashboards now include a Repo Setup tab that checks git access, default branch readiness, GitHub API access, PR metadata access, GitHub Actions status, workflow token permissions, PR workflow secrets, and PR workflow variables.
+- **User-fixable GitHub setup actions** — Repo Setup can apply supported fixes from the UI, including setting workflow token permissions to read/write and adding missing GitHub Actions secrets or variables. Secret values are sent directly to GitHub and are not stored in the app database.
+- **PR checks recovery** — Build Queue tasks with GitHub PRs now expose failed PR checks, classify failures as retryable, repo setup, or external provider issues, and can rerun failed GitHub Actions jobs or rerequest external checks.
+
+### Fixed
+- **Private repo branch detection** — Product creation and settings now validate private repos with authenticated git access instead of relying on public GitHub lookup behavior. The UI detects the remote default branch and requires confirmation before Autopilot starts.
+- **Missing default branch failures** — Workspace isolation now preflights repo branches and uses the detected remote default branch when appropriate, preventing `main` clone failures on repos whose default branch is `master`.
+- **Blocked repo task creation** — Autopilot idea approval now blocks new PR-bound tasks when Repo Setup is known to be blocked, preventing agents from creating PRs that cannot pass repository setup.
+- **Safer stalled-agent recovery** — Agent nudge logic now records visible dispatch errors and only treats a recovery as successful when a replacement active session exists.
+
+---
+
 ## [2.5.0] - 2026-04-14
 
 ### Fixed

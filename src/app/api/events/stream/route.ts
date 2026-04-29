@@ -10,10 +10,10 @@ import { attachChatListener } from '@/lib/chat-listener';
 
 export const dynamic = 'force-dynamic';
 
-// Attach the chat listener on first SSE connection (idempotent)
-attachChatListener();
-
 export async function GET(request: NextRequest) {
+  // Attach the chat listener on first SSE connection (idempotent) without doing
+  // gateway work at module import/build time.
+  attachChatListener();
   const encoder = new TextEncoder();
 
   // Create a readable stream for SSE

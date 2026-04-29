@@ -33,27 +33,27 @@ export function collectRecentLogs(context: {
       }
     }
 
-    const failedCycles = queryAll<{ id: string; error_message: string; current_phase: string; created_at: string }>(
-      `SELECT id, error_message, current_phase, created_at FROM ideation_cycles
-       WHERE product_id = ? AND status = 'failed' ORDER BY created_at DESC LIMIT 3`,
+    const failedCycles = queryAll<{ id: string; error_message: string; current_phase: string; started_at: string }>(
+      `SELECT id, error_message, current_phase, started_at FROM ideation_cycles
+       WHERE product_id = ? AND status = 'failed' ORDER BY started_at DESC LIMIT 3`,
       [context.productId]
     );
     if (failedCycles.length > 0) {
       sections.push('\n--- Failed Ideation Cycles ---');
       for (const c of failedCycles) {
-        sections.push(`[${c.created_at}] ${c.id.slice(0, 8)} phase:${c.current_phase} err:${c.error_message}`);
+        sections.push(`[${c.started_at}] ${c.id.slice(0, 8)} phase:${c.current_phase} err:${c.error_message}`);
       }
     }
 
-    const failedResearch = queryAll<{ id: string; error_message: string; current_phase: string; created_at: string }>(
-      `SELECT id, error_message, current_phase, created_at FROM research_cycles
-       WHERE product_id = ? AND status = 'failed' ORDER BY created_at DESC LIMIT 3`,
+    const failedResearch = queryAll<{ id: string; error_message: string; current_phase: string; started_at: string }>(
+      `SELECT id, error_message, current_phase, started_at FROM research_cycles
+       WHERE product_id = ? AND status = 'failed' ORDER BY started_at DESC LIMIT 3`,
       [context.productId]
     );
     if (failedResearch.length > 0) {
       sections.push('\n--- Failed Research Cycles ---');
       for (const c of failedResearch) {
-        sections.push(`[${c.created_at}] ${c.id.slice(0, 8)} phase:${c.current_phase} err:${c.error_message}`);
+        sections.push(`[${c.started_at}] ${c.id.slice(0, 8)} phase:${c.current_phase} err:${c.error_message}`);
       }
     }
   }

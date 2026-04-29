@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryOne, run } from '@/lib/db';
-import { triggerAutoDispatch } from '@/lib/auto-dispatch';
+import { dispatchTaskFromServer } from '@/lib/server-dispatch';
+import { broadcast } from '@/lib/events';
+import type { Task } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 /**
@@ -45,23 +47,15 @@ export async function POST(
       }, { status: 400 });
     }
 
-    // Get agent name for logging
-    const agent = queryOne<{ name: string }>('SELECT name FROM agents WHERE id = ?', [task.assigned_agent_id]);
-
     // Trigger the dispatch
-    const result = await triggerAutoDispatch({
-      taskId: task.id,
-      taskTitle: task.title,
-      agentId: task.assigned_agent_id,
-      agentName: agent?.name || 'Unknown Agent',
-      workspaceId: task.workspace_id
-    });
+    const result = await dispatchTaskFromServer(task.id);
 
     // Update task state based on dispatch result — preserve planning data either way
     if (result.success) {
       run(`
         UPDATE tasks
         SET planning_dispatch_error = NULL,
+            status_reason = NULL,
             updated_at = datetime('now')
         WHERE id = ?
       `, [taskId]);
@@ -74,6 +68,11 @@ export async function POST(
             updated_at = datetime('now')
         WHERE id = ?
       `, [result.error, 'Dispatch retry failed: ' + result.error, taskId]);
+    }
+
+    const refreshedTask = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [taskId]);
+    if (refreshedTask) {
+      broadcast({ type: 'task_updated', payload: refreshedTask });
     }
 
     if (result.success) {
@@ -99,6 +98,11 @@ export async function POST(
           updated_at = datetime('now')
       WHERE id = ?
     `, [`Retry error: ${errorMessage}`, `Retry error: ${errorMessage}`, taskId]);
+
+    const refreshedTask = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [taskId]);
+    if (refreshedTask) {
+      broadcast({ type: 'task_updated', payload: refreshedTask });
+    }
 
     return NextResponse.json({
       error: 'Failed to retry dispatch',

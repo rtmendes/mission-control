@@ -109,6 +109,8 @@ export const CreateProductSchema = z.object({
   settings: z.string().optional(),
   build_mode: z.enum(['auto_build', 'plan_first']).optional(),
   default_branch: z.string().max(200).optional(),
+  repo_access_confirmed: z.boolean().optional(),
+  repo_branch_confirmed: z.boolean().optional(),
 });
 
 export const UpdateProductSchema = z.object({
@@ -122,6 +124,8 @@ export const UpdateProductSchema = z.object({
   settings: z.string().optional(),
   build_mode: z.enum(['auto_build', 'plan_first']).optional(),
   default_branch: z.string().max(200).optional(),
+  repo_access_confirmed: z.boolean().optional(),
+  repo_branch_confirmed: z.boolean().optional(),
   cost_cap_per_task: z.number().min(0).optional().nullable(),
   cost_cap_monthly: z.number().min(0).optional().nullable(),
   batch_review_threshold: z.number().int().min(1).max(100).optional(),

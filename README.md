@@ -28,7 +28,7 @@ I highly recommend getting Hetzner VPS to run this. <a href="https://hetzner.clo
   <a href="https://missioncontrol.ghray.com"><strong>🎮 Live Demo</strong></a> •
   <a href="#-quick-start">Quick Start</a> •
   <a href="#-docker">Docker</a> •
-  <a href="#-whats-new-in-v250">What's New</a> •
+  <a href="#-whats-new-in-v251">What's New</a> •
   <a href="#-features">Features</a> •
   <a href="#-how-it-works">How It Works</a> •
   <a href="#-configuration">Configuration</a> •
@@ -41,7 +41,22 @@ I highly recommend getting Hetzner VPS to run this. <a href="https://hetzner.clo
 
 ---
 
-## 🚀 What's New in v2.5.0
+## 🚀 What's New in v2.5.1
+
+### Repo Setup & PR Recovery
+Autopilot now has a product-level **Repo Setup** tab that verifies a repository is ready before agents create PR-bound work. It checks authenticated git access, default branch confirmation, GitHub API and PR metadata access, GitHub Actions status, workflow token permissions, PR workflow secrets, and PR workflow variables.
+
+When setup is blocked, users can fix supported GitHub configuration from the UI: set workflow token permissions to read/write, add missing Actions secrets, and add missing Actions variables. Secret values are written directly to GitHub and are not stored in Autensa.
+
+Build Queue tasks with GitHub PRs now include a **PR checks** recovery panel. Failed checks are classified as retryable, repo setup, or external provider failures, with actions to rerun failed GitHub Actions jobs or rerequest external checks where GitHub supports it.
+
+### Private Repo Readiness
+Product creation and settings now validate private repos with authenticated git access, detect the remote default branch, and require user confirmation before Autopilot starts. Workspace isolation preflights the selected branch and can use the detected default branch, avoiding `main` clone failures on repos that use `master`.
+
+### Previous Releases
+
+<details>
+<summary>v2.5.0 — Dispatch & Product Settings Fixes</summary>
 
 ### Per-Task Agent Sessions ([#99](https://github.com/crshdn/mission-control/issues/99))
 Each dispatched task now gets its own OpenClaw conversation session. Previously, all tasks assigned to the same agent shared one session, causing context to accumulate across tasks until the model's context window was exhausted and the agent stalled. The `openclaw_sessions` table already had a `task_id` column — dispatch now uses it for session lookup, session ID generation, and insert. Parallel tasks on the same agent work independently.
@@ -55,7 +70,7 @@ The task delete button now shows a loading state ("Deleting..."), disables durin
 ### Product Pause & Archive ([#98](https://github.com/crshdn/mission-control/issues/98))
 The Autopilot product settings modal now includes a **Status** dropdown (Active / Paused) and a **Danger Zone** section with an Archive button. Paused products stop automated research and ideation cycles. Archived products are hidden from the dashboard but data is preserved. The main product listing now filters out archived products.
 
-### Previous Releases
+</details>
 
 <details>
 <summary>v2.4.1 — Community Bug Fixes</summary>

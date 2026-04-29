@@ -17,7 +17,7 @@ function getGatewayToken(): string {
 }
 
 function getDefaultModel(): string {
-  return process.env.AUTOPILOT_MODEL || 'anthropic/claude-sonnet-4-6';
+  return OPENCLAW_GATEWAY_MODEL;
 }
 
 function resolveGatewayModel(model: string): { gatewayModel: string; modelOverride: string | null } {

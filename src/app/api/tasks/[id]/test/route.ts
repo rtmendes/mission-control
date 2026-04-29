@@ -17,6 +17,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { existsSync, mkdirSync, readFileSync } from 'fs';
 import path from 'path';
 import * as csstree from 'css-tree';
+import { broadcast } from '@/lib/events';
+import { drainQueue, handleStageFailure, handleStageTransition } from '@/lib/workflow-engine';
 import type { Task, TaskDeliverable } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -59,6 +61,7 @@ interface TestResponse {
   summary: string;
   testedAt: string;
   newStatus?: string;
+  dispatchError?: string;
 }
 
 // Screenshots stored in projects directory - set via PROJECTS_PATH env var
@@ -71,7 +74,7 @@ const SCREENSHOTS_DIR = ((process.env.PROJECTS_PATH || '~/projects').replace(/^~
  * Enhanced workflow:
  * - Runs on tasks in 'testing' status (moved there after agent completion)
  * - PASS -> moves to 'review' for human approval
- * - FAIL -> moves to 'assigned' for agent to fix
+ * - FAIL -> triggers workflow fail-loopback for agent rework
  */
 export async function POST(
   request: NextRequest,
@@ -166,11 +169,12 @@ export async function POST(
     // Update task status based on results
     const now = new Date().toISOString();
     let newStatus: string | undefined;
+    let dispatchError: string | undefined;
 
     if (passed) {
-      // Tests passed -> move to review for human approval
+      // Tests passed -> move to review, then let the workflow engine drain/dispatch the next stage.
       run(
-        'UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?',
+        'UPDATE tasks SET status = ?, planning_dispatch_error = NULL, status_reason = NULL, updated_at = ? WHERE id = ?',
         ['review', now, taskId]
       );
       newStatus = 'review';
@@ -186,13 +190,49 @@ export async function POST(
           now
         ]
       );
+
+      const updatedTask = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [taskId]);
+      if (updatedTask) {
+        broadcast({ type: 'task_updated', payload: updatedTask });
+      }
+
+      const transitionResult = await handleStageTransition(taskId, 'review', {
+        previousStatus: task.status,
+      });
+
+      if (!transitionResult.success && transitionResult.error) {
+        dispatchError = transitionResult.error;
+      }
+
+      const refreshedTask = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [taskId]);
+      if (refreshedTask) {
+        newStatus = refreshedTask.status;
+        broadcast({ type: 'task_updated', payload: refreshedTask });
+      }
     } else {
-      // Tests failed -> move back to assigned for agent to fix
-      run(
-        'UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?',
-        ['assigned', now, taskId]
-      );
-      newStatus = 'assigned';
+      // Tests failed -> use workflow fail-loopback so the builder is re-dispatched.
+      const failureResult = await handleStageFailure(taskId, task.status, summary);
+      let refreshedTask = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [taskId]);
+
+      if (!failureResult.success) {
+        dispatchError = failureResult.error || 'Failed to process test failure';
+
+        // If the workflow engine did not move the task, preserve legacy behavior
+        // but record the reason so it is visible on the card.
+        if (!refreshedTask || refreshedTask.status === task.status) {
+          run(
+            'UPDATE tasks SET status = ?, planning_dispatch_error = ?, status_reason = ?, updated_at = ? WHERE id = ?',
+            ['assigned', dispatchError, `Automated tests failed: ${summary}`, now, taskId]
+          );
+          refreshedTask = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [taskId]);
+        }
+      } else {
+        drainQueue(taskId, task.workspace_id).catch(err =>
+          console.error('[Workflow] drainQueue after automated test failure failed:', err)
+        );
+      }
+
+      newStatus = refreshedTask?.status || 'assigned';
 
       run(
         `INSERT INTO task_activities (id, task_id, activity_type, message, created_at)
@@ -201,10 +241,14 @@ export async function POST(
           uuidv4(),
           taskId,
           'status_changed',
-          'Task moved back to ASSIGNED due to failed automated tests - agent needs to fix issues',
+          `Automated tests failed - task routed to ${newStatus.toUpperCase()} for rework`,
           now
         ]
       );
+
+      if (refreshedTask) {
+        broadcast({ type: 'task_updated', payload: refreshedTask });
+      }
     }
 
     const response: TestResponse = {
@@ -214,7 +258,8 @@ export async function POST(
       results,
       summary,
       testedAt: new Date().toISOString(),
-      newStatus
+      newStatus,
+      dispatchError
     };
 
     return NextResponse.json(response);
@@ -523,7 +568,7 @@ export async function GET(
     workflow: {
       expectedStatus: 'testing',
       onPass: 'Moves to review for human approval',
-      onFail: 'Moves to assigned for agent to fix issues'
+      onFail: 'Triggers workflow fail-loopback for agent rework'
     },
     usage: {
       method: 'POST',

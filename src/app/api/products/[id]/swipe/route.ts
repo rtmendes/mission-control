@@ -15,7 +15,7 @@ export async function POST(
     if (!validation.success) {
       return NextResponse.json({ error: 'Validation failed', details: validation.error.issues }, { status: 400 });
     }
-    const result = recordSwipe(id, validation.data);
+    const result = await recordSwipe(id, validation.data);
     return NextResponse.json(result);
   } catch (error) {
     console.error('Failed to record swipe:', error);

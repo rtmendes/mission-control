@@ -19,6 +19,25 @@ interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
+function recordDispatchError(taskId: string, error: string): void {
+  const now = new Date().toISOString();
+
+  run(
+    'UPDATE tasks SET planning_dispatch_error = ?, status_reason = ?, updated_at = ? WHERE id = ?',
+    [error, `Dispatch failed: ${error}`, now, taskId]
+  );
+
+  const updatedTask = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [taskId]);
+  if (updatedTask) {
+    broadcast({ type: 'task_updated', payload: updatedTask });
+  }
+}
+
+function dispatchErrorResponse(taskId: string, error: string, status: number) {
+  recordDispatchError(taskId, error);
+  return NextResponse.json({ error }, { status });
+}
+
 /**
  * POST /api/tasks/[id]/dispatch
  * 
@@ -64,10 +83,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     if (!assignedAgentId) {
-      return NextResponse.json(
-        { error: 'Task has no routable agent' },
-        { status: 400 }
-      );
+      return dispatchErrorResponse(id, 'Task has no routable agent', 400);
     }
 
     // Get agent details
@@ -77,7 +93,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     );
 
     if (!agent) {
-      return NextResponse.json({ error: 'Assigned agent not found' }, { status: 404 });
+      return dispatchErrorResponse(id, 'Assigned agent not found', 404);
     }
 
     // Check if dispatching to the master agent while there are other orchestrators available
@@ -98,10 +114,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       );
 
       if (otherOrchestrators.length > 0) {
+        const message = `There ${otherOrchestrators.length === 1 ? 'is' : 'are'} ${otherOrchestrators.length} other orchestrator${otherOrchestrators.length === 1 ? '' : 's'} available in this workspace: ${otherOrchestrators.map(o => o.name).join(', ')}. Consider assigning this task to them instead.`;
+        recordDispatchError(id, `Other orchestrators available: ${message}`);
+
         return NextResponse.json({
           success: false,
           warning: 'Other orchestrators available',
-          message: `There ${otherOrchestrators.length === 1 ? 'is' : 'are'} ${otherOrchestrators.length} other orchestrator${otherOrchestrators.length === 1 ? '' : 's'} available in this workspace: ${otherOrchestrators.map(o => o.name).join(', ')}. Consider assigning this task to them instead.`,
+          message,
           otherOrchestrators,
         }, { status: 409 }); // 409 Conflict - indicating there's an alternative
       }
@@ -115,10 +134,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       } catch (err) {
         console.error('Failed to connect to OpenClaw Gateway:', err);
         client.forceReconnect();
-        return NextResponse.json(
-          { error: 'Failed to connect to OpenClaw Gateway' },
-          { status: 503 }
-        );
+        return dispatchErrorResponse(id, 'Failed to connect to OpenClaw Gateway', 503);
       }
     }
 
@@ -127,6 +143,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       'SELECT * FROM openclaw_sessions WHERE agent_id = ? AND task_id = ? AND status = ?',
       [agent.id, id, 'active']
     );
+    const reusedExistingSession = Boolean(session);
 
     const now = new Date().toISOString();
 
@@ -155,11 +172,19 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     if (!session) {
-      return NextResponse.json(
-        { error: 'Failed to create agent session' },
-        { status: 500 }
-      );
+      return dispatchErrorResponse(id, 'Failed to create agent session', 500);
     }
+
+    console.info('[Dispatch] Agent session resolved for task dispatch', JSON.stringify({
+      taskId: id,
+      taskStatus: task.status,
+      agentId: agent.id,
+      agentName: agent.name,
+      reusedExistingSession,
+      sessionId: session.openclaw_session_id,
+      sessionCreatedAt: session.created_at,
+      sessionUpdatedAt: session.updated_at,
+    }));
 
     // Cost cap warning check
     let costCapWarning: string | undefined;
@@ -445,18 +470,39 @@ If you need help or clarification, ask the orchestrator.`;
         idempotencyKey: `dispatch-${task.id}-${Date.now()}`
       });
 
+      console.info('[Dispatch] Task message delivered to agent session', JSON.stringify({
+        taskId: task.id,
+        agentId: agent.id,
+        sessionId: session.openclaw_session_id,
+        previousTaskStatus: task.status,
+        expectedTaskStatus: task.status === 'assigned' ? 'in_progress' : task.status,
+      }));
+
       // Only move to in_progress for builder dispatch (task is in 'assigned' status)
       // For tester/reviewer/verifier, the task status is already correct
       if (task.status === 'assigned') {
         run(
-          'UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?',
+          'UPDATE tasks SET status = ?, planning_dispatch_error = NULL, status_reason = NULL, updated_at = ? WHERE id = ?',
           ['in_progress', now, id]
+        );
+      } else {
+        run(
+          'UPDATE tasks SET planning_dispatch_error = NULL, status_reason = NULL, updated_at = ? WHERE id = ?',
+          [now, id]
         );
       }
 
       // Broadcast task update
       const updatedTask = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [id]);
       if (updatedTask) {
+        console.info('[Dispatch] Task state after dispatch delivery', JSON.stringify({
+          taskId: task.id,
+          agentId: agent.id,
+          sessionId: session.openclaw_session_id,
+          taskStatus: updatedTask.status,
+          planningDispatchError: updatedTask.planning_dispatch_error || null,
+          statusReason: updatedTask.status_reason || null,
+        }));
         broadcast({
           type: 'task_updated',
           payload: updatedTask,
@@ -500,8 +546,12 @@ If you need help or clarification, ask the orchestrator.`;
       client2.forceReconnect();
       // Reset task to 'assigned' so dispatch can be retried
       run(
-        `UPDATE tasks SET status = 'assigned', planning_dispatch_error = ?, updated_at = datetime('now') WHERE id = ? AND status != 'done'`,
-        [`Dispatch delivery failed: ${(err as Error).message}`, id]
+        `UPDATE tasks SET status = 'assigned', planning_dispatch_error = ?, status_reason = ?, updated_at = datetime('now') WHERE id = ? AND status != 'done'`,
+        [
+          `Dispatch delivery failed: ${(err as Error).message}`,
+          `Dispatch failed: ${(err as Error).message}`,
+          id,
+        ]
       );
       const failedTask = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [id]);
       if (failedTask) {

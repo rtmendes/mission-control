@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAgentHealth, checkAgentHealth } from '@/lib/agent-health';
+import { evaluateAgentHealth, getAgentHealth } from '@/lib/agent-health';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,9 +14,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const health = getAgentHealth(id);
     if (!health) {
-      // No health record yet — compute live
-      const state = checkAgentHealth(id);
-      return NextResponse.json({ agent_id: id, health_state: state, computed: true });
+      // No health record yet — compute live with the richer display state.
+      const evaluation = evaluateAgentHealth(id);
+      return NextResponse.json({ ...evaluation, computed: true });
     }
 
     return NextResponse.json(health);
