@@ -24,7 +24,7 @@ export async function POST(
       return NextResponse.json({ error: 'Validation failed', details: validation.error.issues }, { status: 400 });
     }
 
-    const results = batchSwipe(id, validation.data.actions);
+    const results = await batchSwipe(id, validation.data.actions);
     return NextResponse.json({
       processed: results.length,
       results: results.map(r => ({

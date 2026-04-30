@@ -7,12 +7,13 @@
  *   - sandbox:  rsync copy per task (for non-repo projects)
  */
 
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { queryOne, queryAll, run } from '@/lib/db';
 import { getProjectsPath } from '@/lib/config';
+import { preflightRepoAccess } from '@/lib/repo-preflight';
 import type { Task, Product } from '@/lib/types';
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -63,6 +64,85 @@ export interface WorkspaceStatus {
   deletions?: number;
   mergeStatus?: string;
   conflicts?: string[];
+}
+
+interface ExecFailure extends Error {
+  status?: number;
+  signal?: string;
+  stdout?: Buffer | string;
+  stderr?: Buffer | string;
+}
+
+function redactRepoUrl(repoUrl: string): string {
+  try {
+    const parsed = new URL(repoUrl);
+    parsed.username = parsed.username ? '<redacted>' : '';
+    parsed.password = parsed.password ? '<redacted>' : '';
+    return parsed.toString();
+  } catch {
+    return repoUrl.replace(/:\/\/[^/@]+@/, '://<redacted>@');
+  }
+}
+
+function outputSnippet(value: unknown): string | undefined {
+  if (!value) return undefined;
+  const text = Buffer.isBuffer(value) ? value.toString('utf-8') : String(value);
+  const trimmed = text.trim();
+  return trimmed ? trimmed.slice(0, 1000) : undefined;
+}
+
+function summarizeExecFailure(error: unknown) {
+  const err = error as ExecFailure;
+  return {
+    message: err.message,
+    status: err.status,
+    signal: err.signal,
+    stdout: outputSnippet(err.stdout),
+    stderr: outputSnippet(err.stderr),
+  };
+}
+
+function parseDefaultBranch(lsRemoteOutput: string): string | undefined {
+  const match = lsRemoteOutput.match(/ref:\s+refs\/heads\/([^\s]+)\s+HEAD/);
+  return match?.[1];
+}
+
+function parseHeadBranches(lsRemoteOutput: string): string[] {
+  return lsRemoteOutput
+    .split('\n')
+    .map(line => line.match(/refs\/heads\/(.+)$/)?.[1])
+    .filter((branch): branch is string => Boolean(branch));
+}
+
+function logRemoteBranchProbe(repoUrl: string, requestedBranch: string, taskId: string): void {
+  try {
+    const defaultOutput = execFileSync('git', ['ls-remote', '--symref', repoUrl, 'HEAD'], {
+      encoding: 'utf-8',
+      timeout: 30000,
+      stdio: 'pipe',
+    });
+    const branchesToCheck = Array.from(new Set([requestedBranch, 'main', 'master', 'trunk', 'develop'].filter(Boolean)));
+    const headsOutput = execFileSync('git', ['ls-remote', '--heads', repoUrl, ...branchesToCheck], {
+      encoding: 'utf-8',
+      timeout: 30000,
+      stdio: 'pipe',
+    });
+
+    console.warn('[WorkspaceIsolation] Remote branch probe after clone failure', JSON.stringify({
+      taskId,
+      repoUrl: redactRepoUrl(repoUrl),
+      requestedBranch,
+      defaultBranch: parseDefaultBranch(defaultOutput),
+      matchingBranches: parseHeadBranches(headsOutput),
+    }));
+  } catch (probeError) {
+    console.warn('[WorkspaceIsolation] Remote branch probe failed after clone failure', JSON.stringify({
+      taskId,
+      repoUrl: redactRepoUrl(repoUrl),
+      requestedBranch,
+      probeError: summarizeExecFailure(probeError),
+    }));
+  }
 }
 
 // ─── Port Allocator ──────────────────────────────────────────────────
@@ -191,7 +271,7 @@ export async function createTaskWorkspace(task: Task): Promise<WorkspaceInfo> {
     createdAt: new Date().toISOString(),
     strategy,
     branch: result.branch,
-    baseBranch,
+    baseBranch: result.baseBranch,
     baseCommit: result.baseCommit,
     status: 'active',
     agentId: task.assigned_agent_id || undefined,
@@ -262,18 +342,52 @@ async function createWorktreeWorkspace(
 
   // Not a local git repo — clone from repo_url
   if (task.repo_url) {
+    let cloneBranch = baseBranch;
+    const preflight = preflightRepoAccess(task.repo_url, baseBranch);
+    if (!preflight.ok) {
+      if (preflight.access === 'confirmed' && preflight.resolvedBranch) {
+        cloneBranch = preflight.resolvedBranch;
+        console.warn('[WorkspaceIsolation] Requested branch missing; using detected default branch', JSON.stringify({
+          taskId: task.id,
+          repoUrl: redactRepoUrl(task.repo_url),
+          requestedBranch: baseBranch,
+          resolvedBranch: cloneBranch,
+        }));
+        run('UPDATE tasks SET repo_branch = ?, updated_at = datetime(\'now\') WHERE id = ?', [cloneBranch, task.id]);
+      } else {
+        throw new Error(`Repository preflight failed: ${preflight.message}${preflight.error ? ` ${preflight.error}` : ''}`);
+      }
+    }
+
+    console.info('[WorkspaceIsolation] Cloning repo for isolated workspace', JSON.stringify({
+      taskId: task.id,
+      repoUrl: redactRepoUrl(task.repo_url),
+      requestedBranch: cloneBranch,
+      workspaceDir,
+    }));
+
     try {
-      execSync(
-        `git clone --branch "${baseBranch}" "${task.repo_url}" "${workspaceDir}"`,
+      execFileSync(
+        'git',
+        ['clone', '--branch', cloneBranch, task.repo_url, workspaceDir],
         { stdio: 'pipe', timeout: 120000 }
       );
-      execSync(
-        `git checkout -b "${branchName}"`,
+      execFileSync(
+        'git',
+        ['checkout', '-b', branchName],
         { cwd: workspaceDir, stdio: 'pipe' }
       );
       const baseCommit = execSync(`git rev-parse HEAD`, { cwd: workspaceDir, encoding: 'utf-8' }).trim();
-      return { path: workspaceDir, strategy: 'worktree', branch: branchName, baseBranch, baseCommit, port };
+      return { path: workspaceDir, strategy: 'worktree', branch: branchName, baseBranch: cloneBranch, baseCommit, port };
     } catch (err) {
+      console.warn('[WorkspaceIsolation] Clone failed for isolated workspace', JSON.stringify({
+        taskId: task.id,
+        repoUrl: redactRepoUrl(task.repo_url),
+        requestedBranch: cloneBranch,
+        workspaceDir,
+        error: summarizeExecFailure(err),
+      }));
+      logRemoteBranchProbe(task.repo_url, cloneBranch, task.id);
       throw new Error(`Failed to clone repo: ${(err as Error).message}`);
     }
   }

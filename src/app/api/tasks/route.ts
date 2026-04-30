@@ -4,6 +4,7 @@ import { queryAll, queryOne, run } from '@/lib/db';
 import { broadcast } from '@/lib/events';
 import { CreateTaskSchema } from '@/lib/validation';
 import { populateTaskRolesFromAgents } from '@/lib/workflow-engine';
+import { dispatchTaskFromServer } from '@/lib/server-dispatch';
 import type { Task, CreateTaskRequest, Agent } from '@/lib/types';
 
 // GET /api/tasks - List all tasks with optional filters
@@ -142,8 +143,31 @@ export async function POST(request: NextRequest) {
       [uuidv4(), 'task_created', body.created_by_agent_id || null, id, eventMessage, now]
     );
 
-    // Fetch created task with all joined fields
-    const task = queryOne<Task>(
+    // Auto-populate workflow roles from workspace agents
+    populateTaskRolesFromAgents(id, workspaceId);
+
+    if (status === 'assigned' && validatedData.assigned_agent_id) {
+      const dispatchResult = await dispatchTaskFromServer(id);
+      if (!dispatchResult.success) {
+        run(
+          'UPDATE tasks SET planning_dispatch_error = ?, status_reason = ?, updated_at = ? WHERE id = ?',
+          [
+            dispatchResult.error || 'Dispatch failed',
+            `Dispatch failed: ${dispatchResult.error || 'Dispatch failed'}`,
+            new Date().toISOString(),
+            id,
+          ]
+        );
+      }
+    } else if (status === 'assigned') {
+      run(
+        'UPDATE tasks SET planning_dispatch_error = ?, status_reason = ?, updated_at = ? WHERE id = ?',
+        ['No agent assigned', 'Dispatch failed: No agent assigned', new Date().toISOString(), id]
+      );
+    }
+
+    // Fetch created task with all joined fields after any dispatch side effects
+    const task = queryOne<Task & { assigned_agent_name?: string; assigned_agent_emoji?: string; created_by_agent_name?: string; created_by_agent_emoji?: string }>(
       `SELECT t.*,
         aa.name as assigned_agent_name,
         aa.avatar_emoji as assigned_agent_emoji,
@@ -155,19 +179,29 @@ export async function POST(request: NextRequest) {
        WHERE t.id = ?`,
       [id]
     );
-    
-    // Auto-populate workflow roles from workspace agents
-    populateTaskRolesFromAgents(id, workspaceId);
+
+    const transformedTask = task
+      ? {
+          ...task,
+          assigned_agent: task.assigned_agent_id
+            ? {
+                id: task.assigned_agent_id,
+                name: task.assigned_agent_name,
+                avatar_emoji: task.assigned_agent_emoji,
+              }
+            : undefined,
+        }
+      : task;
 
     // Broadcast task creation via SSE
-    if (task) {
+    if (transformedTask) {
       broadcast({
         type: 'task_created',
-        payload: task,
+        payload: transformedTask,
       });
     }
 
-    return NextResponse.json(task, { status: 201 });
+    return NextResponse.json(transformedTask, { status: 201 });
   } catch (error) {
     console.error('Failed to create task:', error);
     return NextResponse.json({ error: 'Failed to create task' }, { status: 500 });

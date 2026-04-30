@@ -79,7 +79,10 @@ export function AgentsSidebar({ workspaceId, mobileMode = false, isPortrait = tr
           const data = await res.json();
           const healthMap: Record<string, AgentHealthState> = {};
           for (const h of data) {
-            healthMap[h.agent_id] = h.health_state;
+            const metadata = typeof h.metadata === 'string'
+              ? (() => { try { return JSON.parse(h.metadata); } catch { return {}; } })()
+              : (h.metadata || {});
+            healthMap[h.agent_id] = (h.display_state || metadata.display_state || h.health_state) as AgentHealthState;
           }
           setAgentHealth(healthMap);
         }

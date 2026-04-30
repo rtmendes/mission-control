@@ -10,12 +10,12 @@ interface GatewayAgent {
 }
 
 /** Normalise the gateway model field to a plain string for DB storage. */
-function normaliseModel(
+export function normaliseModel(
   model: GatewayAgent['model'],
 ): string | null {
   if (!model) return null;
   if (typeof model === 'string') return model;
-  return model.primary ?? null;
+  return typeof model.primary === 'string' ? model.primary : null;
 }
 
 const SYNC_INTERVAL_MS = Number(process.env.AGENT_CATALOG_SYNC_INTERVAL_MS || 60_000);

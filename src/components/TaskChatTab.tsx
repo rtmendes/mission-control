@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Send, Check, Loader, MessageSquare } from 'lucide-react';
+import { Check, Clock, Loader, MessageSquare } from 'lucide-react';
 import { MentionInput } from '@/components/chat/MentionInput';
 import type { TaskNote } from '@/lib/types';
 
@@ -39,21 +39,36 @@ export function TaskChatTab({ taskId }: TaskChatTabProps) {
     fetch(`/api/tasks/${taskId}/read`, { method: 'POST' }).catch(() => {});
   }, [taskId]);
 
-  // Derive "waiting" conservatively.
-  // Old behavior used a 5-minute window for any last user message, which caused
-  // stale "waiting" bubbles even after the task was effectively done or no reply
-  // was realistically coming. Show waiting only while a user message is still
-  // pending delivery, or for a short period right after a delivered user message.
-  const waiting = useMemo(() => {
-    if (notes.length === 0) return false;
-    const last = notes[notes.length - 1];
-    if (last.role !== 'user') return false;
-
-    if (last.status === 'pending') return true;
-
-    const age = Date.now() - new Date(last.created_at).getTime();
-    return age < 15000;
+  const latestUserMessage = useMemo(() => {
+    return [...notes].reverse().find(note => note.role === 'user');
   }, [notes]);
+
+  const assistantAfterLatestUser = useMemo(() => {
+    if (!latestUserMessage) return false;
+    const latestUserAt = new Date(latestUserMessage.created_at.endsWith('Z') ? latestUserMessage.created_at : latestUserMessage.created_at + 'Z').getTime();
+    return notes.some(note =>
+      note.role === 'assistant' &&
+      new Date(note.created_at.endsWith('Z') ? note.created_at : note.created_at + 'Z').getTime() > latestUserAt
+    );
+  }, [latestUserMessage, notes]);
+
+  // Derive "waiting" conservatively.
+  // Do not leave a fake typing bubble up for minutes. After the first short
+  // grace period, show a truthful delivery/capture state instead.
+  const waiting = useMemo(() => {
+    if (!latestUserMessage || assistantAfterLatestUser) return false;
+    if (latestUserMessage.status === 'pending') return true;
+
+    const age = Date.now() - new Date(latestUserMessage.created_at.endsWith('Z') ? latestUserMessage.created_at : latestUserMessage.created_at + 'Z').getTime();
+    return latestUserMessage.status === 'delivered' && age < 15000;
+  }, [latestUserMessage, assistantAfterLatestUser]);
+
+  const awaitingCapturedReply = Boolean(
+    latestUserMessage &&
+    latestUserMessage.status === 'delivered' &&
+    !assistantAfterLatestUser &&
+    !waiting
+  );
 
   // Auto-scroll on new notes or waiting state change
   useEffect(() => {
@@ -149,6 +164,20 @@ export function TaskChatTab({ taskId }: TaskChatTabProps) {
                 <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                 <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                 <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {awaitingCapturedReply && (
+          <div className="mr-8">
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 text-xs text-amber-200 flex items-start gap-2">
+              <Clock className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+              <div>
+                <div className="font-medium">Delivered — waiting for a captured reply</div>
+                <div className="text-amber-200/75 mt-0.5">
+                  The agent received this message. If the agent completes or hands off without a normal chat reply, the Flight Recorder will show that signal instead of leaving this as fake typing.
+                </div>
               </div>
             </div>
           </div>

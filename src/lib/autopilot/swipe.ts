@@ -2,6 +2,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { queryOne, queryAll, run, transaction } from '@/lib/db';
 import { broadcast } from '@/lib/events';
 import { getMissionControlUrl } from '@/lib/config';
+import { preflightRepoAccess } from '@/lib/repo-preflight';
+import { getCachedRepoReadiness, scanRepoReadiness } from '@/lib/repo-readiness';
 import { rebuildPreferenceModel } from './preferences';
 import { recalculateAndBroadcast } from './health-score';
 import type { Idea, Task, Product, SwipeHistoryEntry } from '@/lib/types';
@@ -12,13 +14,49 @@ interface SwipeInput {
   notes?: string;
 }
 
+function readinessIsFresh(checkedAt: string): boolean {
+  const checked = new Date(checkedAt).getTime();
+  return Number.isFinite(checked) && Date.now() - checked < 15 * 60 * 1000;
+}
+
+async function assertProductRepoReadyForTaskCreation(productId: string): Promise<void> {
+  const product = queryOne<Product>('SELECT * FROM products WHERE id = ?', [productId]);
+  if (!product?.repo_url) return;
+
+  const branch = product.default_branch || 'main';
+  const preflight = preflightRepoAccess(product.repo_url, branch);
+  if (!preflight.ok) {
+    if (preflight.access === 'failed') {
+      throw new Error(`Cannot create Autopilot task: repository access is not confirmed for ${preflight.repoUrl}. ${preflight.authHint || preflight.error || ''}`.trim());
+    }
+    throw new Error(`Cannot create Autopilot task: branch "${branch}" was not found for ${preflight.repoUrl}${preflight.defaultBranch ? `. Detected default branch "${preflight.defaultBranch}". Update Product Settings and confirm repo access before approving ideas.` : '.'}`);
+  }
+
+  const cachedReadiness = getCachedRepoReadiness(productId);
+  const readiness = cachedReadiness && readinessIsFresh(cachedReadiness.checkedAt)
+    ? cachedReadiness
+    : await scanRepoReadiness(productId);
+
+  if (readiness.overallStatus === 'blocked') {
+    const blockers = readiness.checks
+      .filter(check => check.status === 'fail' && check.severity === 'blocking')
+      .slice(0, 3)
+      .map(check => check.title)
+      .join(', ');
+    throw new Error(`Cannot create Autopilot task: Repo Setup is blocked${blockers ? ` by ${blockers}` : ''}. Open the Repo Setup tab and fix the repo before approving ideas.`);
+  }
+}
+
 /**
  * Record a swipe action and perform the corresponding operation.
  * Returns the swipeId so the frontend can reference it for undo.
  */
-export function recordSwipe(productId: string, input: SwipeInput): { idea: Idea; task?: Task; swipeId: string } {
+export async function recordSwipe(productId: string, input: SwipeInput): Promise<{ idea: Idea; task?: Task; swipeId: string }> {
   const idea = queryOne<Idea>('SELECT * FROM ideas WHERE id = ? AND product_id = ?', [input.idea_id, productId]);
   if (!idea) throw new Error(`Idea ${input.idea_id} not found`);
+  if (input.action === 'approve' || input.action === 'fire') {
+    await assertProductRepoReadyForTaskCreation(productId);
+  }
 
   const swipeId = uuidv4();
 
@@ -185,10 +223,14 @@ export function undoSwipe(productId: string, swipeId: string): { idea: Idea } {
  * Process a batch of swipe actions in a single transaction.
  * All-or-nothing: if any idea fails, entire batch rolls back.
  */
-export function batchSwipe(
+export async function batchSwipe(
   productId: string,
   actions: Array<{ idea_id: string; action: 'approve' | 'reject' | 'maybe' | 'fire'; notes?: string }>
-): Array<{ idea_id: string; action: string; idea: Idea; task?: Task; swipeId: string }> {
+): Promise<Array<{ idea_id: string; action: string; idea: Idea; task?: Task; swipeId: string }>> {
+  if (actions.some(action => action.action === 'approve' || action.action === 'fire')) {
+    await assertProductRepoReadyForTaskCreation(productId);
+  }
+
   const results = transaction(() => {
     const batchResults: Array<{ idea_id: string; action: string; idea: Idea; task?: Task; swipeId: string }> = [];
 

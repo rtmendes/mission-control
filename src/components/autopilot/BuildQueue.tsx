@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import type { Task } from '@/lib/types';
+import { PrCheckRecovery } from '@/components/autopilot/PrCheckRecovery';
 
 interface BuildQueueProps {
   productId: string;
@@ -67,21 +68,24 @@ export function BuildQueue({ productId }: BuildQueueProps) {
       ) : (
         <div className="space-y-2">
           {tasks.map(task => (
-            <div key={task.id} className="bg-mc-bg-secondary border border-mc-border rounded-lg p-4 flex items-center justify-between">
-              <div>
-                <h4 className="font-medium text-mc-text text-sm">{task.title}</h4>
-                <span className="text-xs text-mc-text-secondary">{task.priority} priority</span>
-              </div>
-              <div className="flex items-center gap-2">
-                {task.pr_status && (
-                  <span className={`text-xs px-2 py-1 rounded font-medium ${prStatusColors[task.pr_status] || 'bg-mc-bg-tertiary text-mc-text-secondary'}`}>
-                    {prStatusLabels[task.pr_status] || task.pr_status}
+            <div key={task.id} className="bg-mc-bg-secondary border border-mc-border rounded-lg p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h4 className="font-medium text-mc-text text-sm">{task.title}</h4>
+                  <span className="text-xs text-mc-text-secondary">{task.priority} priority</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {task.pr_status && (
+                    <span className={`text-xs px-2 py-1 rounded font-medium ${prStatusColors[task.pr_status] || 'bg-mc-bg-tertiary text-mc-text-secondary'}`}>
+                      {prStatusLabels[task.pr_status] || task.pr_status}
+                    </span>
+                  )}
+                  <span className={`text-xs px-2 py-1 rounded font-medium ${statusColors[task.status] || 'bg-mc-bg-tertiary text-mc-text-secondary'}`}>
+                    {task.status.replace('_', ' ')}
                   </span>
-                )}
-                <span className={`text-xs px-2 py-1 rounded font-medium ${statusColors[task.status] || 'bg-mc-bg-tertiary text-mc-text-secondary'}`}>
-                  {task.status.replace('_', ' ')}
-                </span>
+                </div>
               </div>
+              {task.pr_url && <PrCheckRecovery taskId={task.id} />}
             </div>
           ))}
         </div>

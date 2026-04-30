@@ -9,12 +9,6 @@ import type { Task } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
-// Ensure reply listener is attached even when the task chat UI is used without
-// an SSE subscriber. TaskChatTab polls /api/tasks/:id/chat directly and may
-// never open /api/events/stream, so relying on the SSE route to attach the
-// listener causes agent replies to be missed.
-attachChatListener();
-
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
@@ -25,6 +19,11 @@ export async function GET(
   { params }: RouteParams
 ) {
   try {
+    // Ensure reply listener is attached even when the task chat UI is used without
+    // an SSE subscriber. TaskChatTab polls /api/tasks/:id/chat directly and may
+    // never open /api/events/stream, so relying only on SSE causes replies to be missed.
+    attachChatListener();
+
     const { id } = await params;
     const notes = getTaskNotes(id);
     return NextResponse.json(notes);
@@ -40,6 +39,8 @@ export async function POST(
   { params }: RouteParams
 ) {
   try {
+    attachChatListener();
+
     const { id: taskId } = await params;
     const body = await request.json();
     const { message } = body as { message?: string };
@@ -65,23 +66,27 @@ export async function POST(
     if (sessionInfo) {
       try {
         const client = getOpenClawClient();
-        if (client.isConnected()) {
-          // Try chat.send with a 5s timeout — if agent is mid-turn, this works quickly
-          const sendPromise = client.call('chat.send', {
-            sessionKey: sessionInfo.sessionKey,
-            message: message.trim(),
-            idempotencyKey: `chat-${note.id}`
-          });
-          const timeout = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('timeout')), 5000)
-          );
-
-          await Promise.race([sendPromise, timeout]);
-          delivered = true;
-          markNotesDelivered([note.id]);
-          expectReply(sessionInfo.sessionKey, taskId);
-          console.log(`[Chat] Message delivered via chat.send to ${sessionInfo.sessionKey}`);
+        if (!client.isConnected()) {
+          await client.connect();
         }
+
+        // Try chat.send with a 5s timeout — if agent is mid-turn, this works quickly.
+        // Register expected reply only after the send succeeds so the Chat tab
+        // reflects the real state: queued → delivered → awaiting captured reply.
+        const sendPromise = client.call('chat.send', {
+          sessionKey: sessionInfo.sessionKey,
+          message: message.trim(),
+          idempotencyKey: `chat-${note.id}`
+        });
+        const timeout = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), 5000)
+        );
+
+        await Promise.race([sendPromise, timeout]);
+        delivered = true;
+        markNotesDelivered([note.id]);
+        expectReply(sessionInfo.sessionKey, taskId);
+        console.log(`[Chat] Message delivered via chat.send to ${sessionInfo.sessionKey}`);
       } catch {
         console.log('[Chat] chat.send timed out — will try dispatch fallback');
       }

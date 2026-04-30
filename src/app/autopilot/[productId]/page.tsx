@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Rocket, Play, Layers, Lightbulb, BarChart3, FileText, Zap, Loader, Settings, X, Save, ExternalLink, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Rocket, Play, Layers, Lightbulb, BarChart3, FileText, Zap, Loader, Settings, X, Save, ExternalLink, AlertTriangle, Check, ShieldCheck } from 'lucide-react';
 import { SwipeDeck } from '@/components/autopilot/SwipeDeck';
 import { IdeasList } from '@/components/autopilot/IdeasList';
 import { ResearchReport } from '@/components/autopilot/ResearchReport';
@@ -12,12 +12,25 @@ import { ProductProgramEditor } from '@/components/autopilot/ProductProgramEdito
 import { MaybePool } from '@/components/autopilot/MaybePool';
 import { CostDashboard } from '@/components/costs/CostDashboard';
 import { ActivityPanel } from '@/components/autopilot/ActivityPanel';
+import { RepoSetupPanel } from '@/components/autopilot/RepoSetupPanel';
 import { openErrorReport } from '@/components/ErrorReportModal';
 import { useToast } from '@/components/Toast';
 import type { Product } from '@/lib/types';
 
-type Tab = 'swipe' | 'ideas' | 'research' | 'build' | 'costs' | 'program' | 'maybe';
+type Tab = 'swipe' | 'ideas' | 'research' | 'repo' | 'build' | 'costs' | 'program' | 'maybe';
 type PipelineState = 'idle' | 'researching' | 'ideating' | 'done' | 'error';
+type RepoPreflightResult = {
+  ok: boolean;
+  access: 'confirmed' | 'failed';
+  requestedBranch?: string;
+  defaultBranch?: string;
+  branchExists?: boolean;
+  resolvedBranch?: string;
+  needsBranchConfirmation: boolean;
+  message: string;
+  error?: string;
+  authHint?: string;
+};
 
 export default function ProductDashboardPage() {
   const { productId } = useParams<{ productId: string }>();
@@ -31,6 +44,9 @@ export default function ProductDashboardPage() {
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [settingsRepoChecking, setSettingsRepoChecking] = useState(false);
+  const [settingsRepoCheck, setSettingsRepoCheck] = useState<RepoPreflightResult | null>(null);
+  const [settingsRepoConfirmed, setSettingsRepoConfirmed] = useState(false);
   const { addToast } = useToast();
 
   useEffect(() => {
@@ -141,7 +157,62 @@ export default function ProductDashboardPage() {
     });
     setSettingsError(null);
     setSettingsSaved(false);
+    setSettingsRepoCheck(null);
+    setSettingsRepoConfirmed(false);
     setShowSettings(true);
+  }
+
+  function resetSettingsRepoConfirmation() {
+    setSettingsRepoCheck(null);
+    setSettingsRepoConfirmed(false);
+  }
+
+  async function checkSettingsRepoAccess() {
+    if (!settingsForm.repo_url?.trim()) {
+      resetSettingsRepoConfirmation();
+      return;
+    }
+    setSettingsRepoChecking(true);
+    setSettingsError(null);
+    try {
+      const res = await fetch('/api/products/repo-preflight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repo_url: settingsForm.repo_url,
+          default_branch: settingsForm.default_branch || 'main',
+        }),
+      });
+      const data = await res.json().catch(() => ({ error: 'Repository check failed' }));
+      if (!res.ok) throw new Error(data.error || `Repository check failed (${res.status})`);
+      setSettingsRepoCheck(data);
+      setSettingsRepoConfirmed(Boolean(data.ok));
+    } catch (err) {
+      setSettingsRepoCheck({
+        ok: false,
+        access: 'failed',
+        needsBranchConfirmation: false,
+        message: (err as Error).message,
+      });
+      setSettingsRepoConfirmed(false);
+    } finally {
+      setSettingsRepoChecking(false);
+    }
+  }
+
+  function useSettingsDetectedBranch() {
+    if (!settingsRepoCheck?.resolvedBranch) return;
+    const branch = settingsRepoCheck.resolvedBranch;
+    setSettingsForm(f => ({ ...f, default_branch: branch }));
+    setSettingsRepoCheck({
+      ...settingsRepoCheck,
+      ok: true,
+      requestedBranch: branch,
+      branchExists: true,
+      needsBranchConfirmation: false,
+      message: `Repository access confirmed on branch ${branch}.`,
+    });
+    setSettingsRepoConfirmed(true);
   }
 
   async function saveSettings() {
@@ -149,6 +220,13 @@ export default function ProductDashboardPage() {
     setSettingsError(null);
     setSettingsSaved(false);
     try {
+      const repoChanged =
+        (settingsForm.repo_url || '') !== (product?.repo_url || '') ||
+        (settingsForm.default_branch || 'main') !== (product?.default_branch || 'main');
+      if (settingsForm.repo_url && repoChanged && !settingsRepoConfirmed) {
+        throw new Error('Check repository access and confirm the branch before saving repository changes.');
+      }
+
       const body: Record<string, unknown> = {
         name: settingsForm.name,
         description: settingsForm.description || undefined,
@@ -158,6 +236,8 @@ export default function ProductDashboardPage() {
         build_mode: settingsForm.build_mode,
         icon: settingsForm.icon,
         status: settingsForm.status,
+        repo_access_confirmed: !settingsForm.repo_url || !repoChanged || settingsRepoConfirmed,
+        repo_branch_confirmed: !settingsForm.repo_url || !repoChanged || settingsRepoConfirmed,
       };
       const res = await fetch(`/api/products/${productId}`, {
         method: 'PATCH',
@@ -191,11 +271,16 @@ export default function ProductDashboardPage() {
     { id: 'swipe', label: 'Swipe', icon: <Play className="w-4 h-4" /> },
     { id: 'ideas', label: 'Ideas', icon: <Lightbulb className="w-4 h-4" /> },
     { id: 'research', label: 'Research', icon: <Layers className="w-4 h-4" /> },
+    { id: 'repo', label: 'Repo Setup', icon: <ShieldCheck className="w-4 h-4" /> },
     { id: 'build', label: 'Build Queue', icon: <Layers className="w-4 h-4" /> },
     { id: 'maybe', label: 'Maybe', icon: <Layers className="w-4 h-4" /> },
     { id: 'costs', label: 'Costs', icon: <BarChart3 className="w-4 h-4" /> },
     { id: 'program', label: 'Program', icon: <FileText className="w-4 h-4" /> },
   ];
+  const settingsRepoChanged =
+    (settingsForm.repo_url || '') !== (product.repo_url || '') ||
+    (settingsForm.default_branch || 'main') !== (product.default_branch || 'main');
+  const settingsRepoReady = !settingsForm.repo_url || !settingsRepoChanged || settingsRepoConfirmed;
 
   return (
     <div className="min-h-screen bg-mc-bg flex flex-col">
@@ -303,6 +388,7 @@ export default function ProductDashboardPage() {
           {tab === 'swipe' && <SwipeDeck productId={productId} />}
           {tab === 'ideas' && <IdeasList productId={productId} />}
           {tab === 'research' && <ResearchReport productId={productId} />}
+          {tab === 'repo' && <RepoSetupPanel productId={productId} />}
           {tab === 'build' && <BuildQueue productId={productId} />}
           {tab === 'maybe' && <MaybePool productId={productId} />}
           {tab === 'costs' && <CostDashboard productId={productId} />}
@@ -368,7 +454,10 @@ export default function ProductDashboardPage() {
                   <input
                     type="url"
                     value={settingsForm.repo_url || ''}
-                    onChange={e => setSettingsForm(f => ({ ...f, repo_url: e.target.value }))}
+                    onChange={e => {
+                      setSettingsForm(f => ({ ...f, repo_url: e.target.value }));
+                      resetSettingsRepoConfirmation();
+                    }}
                     className="flex-1 bg-mc-bg border border-mc-border rounded-lg px-3 py-2 text-sm text-mc-text focus:outline-none focus:border-mc-accent"
                     placeholder="https://github.com/org/repo"
                   />
@@ -379,6 +468,40 @@ export default function ProductDashboardPage() {
                     </a>
                   )}
                 </div>
+                {settingsForm.repo_url && (
+                  <button
+                    onClick={checkSettingsRepoAccess}
+                    disabled={settingsRepoChecking}
+                    className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 text-xs bg-mc-bg border border-mc-border rounded-lg text-mc-text-secondary hover:text-mc-accent hover:border-mc-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {settingsRepoChecking ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    {settingsRepoChecking ? 'Checking...' : 'Check repo access'}
+                  </button>
+                )}
+                {settingsRepoCheck && (
+                  <div className={`mt-2 rounded-lg border px-3 py-2 text-xs ${
+                    settingsRepoConfirmed
+                      ? 'bg-green-500/10 border-green-500/25 text-green-300'
+                      : settingsRepoCheck.access === 'confirmed'
+                      ? 'bg-amber-500/10 border-amber-500/25 text-amber-300'
+                      : 'bg-red-500/10 border-red-500/25 text-red-300'
+                  }`}>
+                    <p>{settingsRepoCheck.message}</p>
+                    {settingsRepoCheck.defaultBranch && (
+                      <p className="mt-1 text-mc-text-secondary">Detected default branch: <span className="font-mono">{settingsRepoCheck.defaultBranch}</span></p>
+                    )}
+                    {settingsRepoCheck.error && <p className="mt-1 text-red-300">{settingsRepoCheck.error}</p>}
+                    {settingsRepoCheck.authHint && <p className="mt-1 text-mc-text-secondary">{settingsRepoCheck.authHint}</p>}
+                    {settingsRepoCheck.needsBranchConfirmation && settingsRepoCheck.resolvedBranch && (
+                      <button
+                        onClick={useSettingsDetectedBranch}
+                        className="mt-2 px-2.5 py-1 rounded bg-amber-500 text-black font-medium hover:bg-amber-400"
+                      >
+                        Use {settingsRepoCheck.resolvedBranch}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -406,7 +529,10 @@ export default function ProductDashboardPage() {
                   <input
                     type="text"
                     value={settingsForm.default_branch || ''}
-                    onChange={e => setSettingsForm(f => ({ ...f, default_branch: e.target.value }))}
+                    onChange={e => {
+                      setSettingsForm(f => ({ ...f, default_branch: e.target.value }));
+                      resetSettingsRepoConfirmation();
+                    }}
                     className="w-full bg-mc-bg border border-mc-border rounded-lg px-3 py-2 text-sm text-mc-text focus:outline-none focus:border-mc-accent"
                     placeholder="main"
                   />
@@ -478,15 +604,17 @@ export default function ProductDashboardPage() {
               </button>
               <button
                 onClick={saveSettings}
-                disabled={settingsSaving}
+                disabled={settingsSaving || settingsRepoChecking || !settingsRepoReady}
                 className={`min-h-9 px-4 rounded-lg flex items-center gap-2 text-sm font-medium ${
                   settingsSaved
                     ? 'bg-green-500/20 text-green-400'
-                    : 'bg-mc-accent text-white hover:bg-mc-accent/90'
+                    : settingsRepoReady && !settingsRepoChecking
+                    ? 'bg-mc-accent text-white hover:bg-mc-accent/90'
+                    : 'bg-mc-bg-tertiary text-mc-text-secondary cursor-not-allowed'
                 }`}
               >
                 {settingsSaving ? <Loader className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                {settingsSaved ? 'Saved' : settingsSaving ? 'Saving...' : 'Save'}
+                {settingsSaved ? 'Saved' : settingsSaving ? 'Saving...' : !settingsRepoReady ? 'Check repo first' : 'Save'}
               </button>
             </div>
           </div>

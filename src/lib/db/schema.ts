@@ -342,6 +342,25 @@ CREATE TABLE IF NOT EXISTS products (
   updated_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Cached repository readiness checks for Product Autopilot
+CREATE TABLE IF NOT EXISTS repo_readiness_checks (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  check_id TEXT NOT NULL,
+  category TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pass', 'warning', 'fail', 'info')),
+  severity TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'blocking')),
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  details TEXT,
+  actions TEXT,
+  last_checked_at TEXT NOT NULL,
+  resolved_at TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(product_id, check_id)
+);
+
 -- Research cycles: AI research runs per product
 CREATE TABLE IF NOT EXISTS research_cycles (
   id TEXT PRIMARY KEY,
@@ -761,6 +780,7 @@ CREATE INDEX IF NOT EXISTS idx_work_checkpoints_task ON work_checkpoints(task_id
 CREATE INDEX IF NOT EXISTS idx_agent_mailbox_to ON agent_mailbox(to_agent_id, read_at);
 CREATE INDEX IF NOT EXISTS idx_agent_mailbox_convoy ON agent_mailbox(convoy_id);
 CREATE INDEX IF NOT EXISTS idx_products_workspace ON products(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_repo_readiness_product ON repo_readiness_checks(product_id, status, severity);
 CREATE INDEX IF NOT EXISTS idx_research_cycles_product ON research_cycles(product_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ideas_product ON ideas(product_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ideas_status ON ideas(status);

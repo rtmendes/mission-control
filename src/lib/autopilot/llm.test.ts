@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { complete } from './llm';
 
-test('complete sends OpenClaw-compatible chat completion requests for provider models', async () => {
+test('complete defaults to OpenClaw gateway default without an app-level provider override', async () => {
   const originalFetch = global.fetch;
   const originalGatewayUrl = process.env.OPENCLAW_GATEWAY_URL;
   const originalGatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
@@ -11,7 +11,52 @@ test('complete sends OpenClaw-compatible chat completion requests for provider m
 
   process.env.OPENCLAW_GATEWAY_URL = 'ws://127.0.0.1:18789';
   process.env.OPENCLAW_GATEWAY_TOKEN = 'test-token';
-  process.env.AUTOPILOT_MODEL = 'openai-codex/gpt-5.4';
+  process.env.AUTOPILOT_MODEL = 'anthropic/claude-sonnet-4-6';
+
+  const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+  global.fetch = (async (input, init) => {
+    calls.push({ url: String(input), init });
+    return new Response(JSON.stringify({
+      model: 'openclaw/default',
+      choices: [{ message: { content: 'ok' } }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }) as typeof fetch;
+
+  try {
+    const result = await complete('Use the gateway default');
+    assert.equal(result.model, 'openclaw/default');
+    assert.equal(calls.length, 1);
+
+    const headers = calls[0].init?.headers as Record<string, string>;
+    assert.equal(headers['Authorization'], 'Bearer test-token');
+    assert.equal(headers['x-openclaw-model'], undefined);
+
+    const body = JSON.parse(String(calls[0].init?.body));
+    assert.equal(body.model, 'openclaw/default');
+  } finally {
+    global.fetch = originalFetch;
+    if (originalGatewayUrl === undefined) delete process.env.OPENCLAW_GATEWAY_URL;
+    else process.env.OPENCLAW_GATEWAY_URL = originalGatewayUrl;
+    if (originalGatewayToken === undefined) delete process.env.OPENCLAW_GATEWAY_TOKEN;
+    else process.env.OPENCLAW_GATEWAY_TOKEN = originalGatewayToken;
+    if (originalAutopilotModel === undefined) delete process.env.AUTOPILOT_MODEL;
+    else process.env.AUTOPILOT_MODEL = originalAutopilotModel;
+  }
+});
+
+test('complete sends OpenClaw-compatible chat completion requests for explicit provider models', async () => {
+  const originalFetch = global.fetch;
+  const originalGatewayUrl = process.env.OPENCLAW_GATEWAY_URL;
+  const originalGatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
+  const originalAutopilotModel = process.env.AUTOPILOT_MODEL;
+
+  process.env.OPENCLAW_GATEWAY_URL = 'ws://127.0.0.1:18789';
+  process.env.OPENCLAW_GATEWAY_TOKEN = 'test-token';
+  delete process.env.AUTOPILOT_MODEL;
 
   const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
   global.fetch = (async (input, init) => {
@@ -27,7 +72,7 @@ test('complete sends OpenClaw-compatible chat completion requests for provider m
   }) as typeof fetch;
 
   try {
-    const result = await complete('Say hi', { temperature: 0.1, maxTokens: 256 });
+    const result = await complete('Say hi', { model: 'openai-codex/gpt-5.4', temperature: 0.1, maxTokens: 256 });
 
     assert.equal(result.content, '{"ok":true}');
     assert.equal(result.model, 'openai-codex/gpt-5.4');

@@ -237,6 +237,20 @@ export interface OpenClawSession {
 
 export type ActivityType = 'spawned' | 'updated' | 'completed' | 'file_created' | 'status_changed';
 
+export type SemanticAgentHealthState =
+  | 'idle'
+  | 'active_recently'
+  | 'working_silently'
+  | 'awaiting_reply'
+  | 'waiting_for_delivery'
+  | 'completed_not_surfaced'
+  | 'needs_attention'
+  | 'no_heartbeat'
+  | 'genuinely_stuck'
+  | 'blocked'
+  | 'zombie'
+  | 'offline';
+
 export interface TaskActivity {
   id: string;
   task_id: string;
@@ -384,7 +398,14 @@ export interface AgentWithOpenClaw extends Agent {
 // Convoy types
 export type ConvoyStatus = 'active' | 'paused' | 'completing' | 'done' | 'failed';
 export type DecompositionStrategy = 'manual' | 'ai' | 'planning';
-export type AgentHealthState = 'idle' | 'working' | 'stalled' | 'stuck' | 'zombie' | 'offline';
+export type AgentHealthState =
+  | 'idle'
+  | 'working'
+  | 'stalled'
+  | 'stuck'
+  | 'zombie'
+  | 'offline'
+  | SemanticAgentHealthState;
 export type CheckpointType = 'auto' | 'manual' | 'crash_recovery';
 
 // Product Autopilot types
@@ -779,7 +800,11 @@ export interface AgentHealth {
   last_checkpoint_at?: string;
   progress_score: number;
   consecutive_stall_checks: number;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown> | string;
+  display_state?: SemanticAgentHealthState;
+  display_label?: string;
+  reason?: string;
+  severity?: 'info' | 'success' | 'warning' | 'danger';
   updated_at: string;
   // Joined
   agent?: Agent;

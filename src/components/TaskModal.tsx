@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { X, Save, Trash2, Activity, Package, Bot, ClipboardList, Plus, Users, ImageIcon, Truck, Radio, MessageSquare, ExternalLink, HardDrive } from 'lucide-react';
+import { X, Save, Trash2, Activity, Package, Bot, ClipboardList, Plus, Users, ImageIcon, Truck, Radio, MessageSquare, ExternalLink, HardDrive, Route } from 'lucide-react';
 import { useMissionControl } from '@/lib/store';
 import { triggerAutoDispatch, shouldTriggerAutoDispatch } from '@/lib/auto-dispatch';
 import { ActivityLog } from './ActivityLog';
@@ -14,10 +14,11 @@ import { TaskImages } from './TaskImages';
 import { ConvoyTab } from './ConvoyTab';
 import { AgentLiveTab } from './AgentLiveTab';
 import { TaskChatTab } from './TaskChatTab';
+import { TaskFlightRecorder } from './TaskFlightRecorder';
 import { WorkspaceTab } from './WorkspaceTab';
 import type { Task, TaskPriority, TaskStatus } from '@/lib/types';
 
-type TabType = 'overview' | 'planning' | 'convoy' | 'team' | 'activity' | 'deliverables' | 'images' | 'sessions' | 'workspace' | 'agent-live' | 'chat';
+type TabType = 'overview' | 'planning' | 'convoy' | 'team' | 'activity' | 'flight-recorder' | 'deliverables' | 'images' | 'sessions' | 'workspace' | 'agent-live' | 'chat';
 
 interface TaskModalProps {
   task?: Task;
@@ -138,17 +139,6 @@ export function TaskModal({ task, onClose, workspaceId }: TaskModalProps) {
         return;
       }
 
-      // Auto-dispatch if agent assigned (fire-and-forget)
-      if (savedTask.assigned_agent_id && savedTask.status === 'assigned') {
-        triggerAutoDispatch({
-          taskId: savedTask.id,
-          taskTitle: savedTask.title,
-          agentId: savedTask.assigned_agent_id,
-          agentName: savedTask.assigned_agent?.name || 'Unknown Agent',
-          workspaceId: savedTask.workspace_id
-        }).catch((err) => console.error('Auto-dispatch failed:', err));
-      }
-
       if (keepOpen) {
         // "Save & New": clear form, stay open
         setForm({
@@ -203,6 +193,7 @@ export function TaskModal({ task, onClose, workspaceId }: TaskModalProps) {
     { id: 'convoy' as TabType, label: 'Convoy', icon: <Truck className="w-4 h-4" /> },
     { id: 'team' as TabType, label: 'Team', icon: <Users className="w-4 h-4" /> },
     { id: 'activity' as TabType, label: 'Activity', icon: <Activity className="w-4 h-4" /> },
+    { id: 'flight-recorder' as TabType, label: 'Flight Recorder', icon: <Route className="w-4 h-4" /> },
     { id: 'deliverables' as TabType, label: 'Deliverables', icon: <Package className="w-4 h-4" /> },
     { id: 'images' as TabType, label: 'Images', icon: <ImageIcon className="w-4 h-4" /> },
     { id: 'sessions' as TabType, label: 'Sessions', icon: <Bot className="w-4 h-4" /> },
@@ -423,6 +414,11 @@ export function TaskModal({ task, onClose, workspaceId }: TaskModalProps) {
           {/* Activity Tab */}
           {activeTab === 'activity' && task && (
             <ActivityLog taskId={task.id} />
+          )}
+
+          {/* Flight Recorder Tab */}
+          {activeTab === 'flight-recorder' && task && (
+            <TaskFlightRecorder taskId={task.id} />
           )}
 
           {/* Deliverables Tab */}

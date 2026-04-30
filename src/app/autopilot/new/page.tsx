@@ -7,6 +7,19 @@ import Link from 'next/link';
 
 type Step = 'basics' | 'program' | 'schedule' | 'done';
 
+type RepoPreflightResult = {
+  ok: boolean;
+  access: 'confirmed' | 'failed';
+  requestedBranch?: string;
+  defaultBranch?: string;
+  branchExists?: boolean;
+  resolvedBranch?: string;
+  needsBranchConfirmation: boolean;
+  message: string;
+  error?: string;
+  authHint?: string;
+};
+
 function isValidUrl(str: string): boolean {
   try {
     const url = new URL(str);
@@ -22,13 +35,16 @@ export default function NewProductPage() {
   const [saving, setSaving] = useState(false);
   const [scanningRepo, setScanningRepo] = useState(false);
   const [scanningSite, setScanningSite] = useState(false);
+  const [checkingRepoAccess, setCheckingRepoAccess] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
-  const [repoWarning, setRepoWarning] = useState<string | null>(null);
+  const [repoCheck, setRepoCheck] = useState<RepoPreflightResult | null>(null);
+  const [repoConfirmed, setRepoConfirmed] = useState(false);
   const [productId, setProductId] = useState<string | null>(null);
   const [importingReadme, setImportingReadme] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [generatingDesc, setGeneratingDesc] = useState(false);
   const [descError, setDescError] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: '',
     description: '',
@@ -73,21 +89,56 @@ export default function NewProductPage() {
     }
   };
 
-  const validateRepoUrl = async (url: string) => {
-    if (!url) { setRepoWarning(null); return; }
-    // Try to extract owner/repo from GitHub URL
-    const match = url.match(/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?$/);
-    if (!match) { setRepoWarning(null); return; }
-    try {
-      const res = await fetch(`https://api.github.com/repos/${match[1]}/${match[2]}`, { method: 'GET' });
-      if (!res.ok) {
-        setRepoWarning('Could not verify this repository — it may be private or may not exist. Private repos work fine, the agent will use local access.');
-      } else {
-        setRepoWarning(null);
-      }
-    } catch {
-      setRepoWarning('Could not verify this repository — it may be private or may not exist. Private repos work fine, the agent will use local access.');
+  const resetRepoConfirmation = () => {
+    setRepoCheck(null);
+    setRepoConfirmed(false);
+  };
+
+  const checkRepoAccess = async () => {
+    if (!form.repo_url.trim()) {
+      resetRepoConfirmation();
+      return;
     }
+    setCheckingRepoAccess(true);
+    setCreateError(null);
+    try {
+      const res = await fetch('/api/products/repo-preflight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo_url: form.repo_url, default_branch: form.default_branch }),
+      });
+      const data = await res.json().catch(() => ({ error: 'Repository check failed' }));
+      if (!res.ok) {
+        throw new Error(data.error || `Repository check failed (${res.status})`);
+      }
+      setRepoCheck(data);
+      setRepoConfirmed(Boolean(data.ok));
+    } catch (error) {
+      setRepoCheck({
+        ok: false,
+        access: 'failed',
+        needsBranchConfirmation: false,
+        message: (error as Error).message,
+      });
+      setRepoConfirmed(false);
+    } finally {
+      setCheckingRepoAccess(false);
+    }
+  };
+
+  const useDetectedBranch = () => {
+    if (!repoCheck?.resolvedBranch) return;
+    const branch = repoCheck.resolvedBranch;
+    setForm(f => ({ ...f, default_branch: branch }));
+    setRepoCheck({
+      ...repoCheck,
+      ok: true,
+      requestedBranch: branch,
+      branchExists: true,
+      needsBranchConfirmation: false,
+      message: `Repository access confirmed on branch ${branch}.`,
+    });
+    setRepoConfirmed(true);
   };
 
   const handleGenerateDescription = async () => {
@@ -145,24 +196,43 @@ export default function NewProductPage() {
   };
 
   const handleCreate = async () => {
+    if (form.repo_url.trim() && !repoConfirmed) {
+      setCreateError('Check repository access and confirm the branch before creating this product.');
+      return;
+    }
     setSaving(true);
+    setCreateError(null);
     try {
       const res = await fetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          repo_access_confirmed: !form.repo_url.trim() || repoConfirmed,
+          repo_branch_confirmed: !form.repo_url.trim() || repoConfirmed,
+        }),
       });
       if (res.ok) {
         const product = await res.json();
         setProductId(product.id);
         setStep('program');
+      } else {
+        const data = await res.json().catch(() => ({ error: 'Failed to create product' }));
+        setCreateError(data.error || `Failed to create product (${res.status})`);
+        if (data.repo_preflight) {
+          setRepoCheck(data.repo_preflight);
+          setRepoConfirmed(false);
+        }
       }
     } catch (error) {
+      setCreateError('Failed to create product.');
       console.error('Failed to create product:', error);
     } finally {
       setSaving(false);
     }
   };
+
+  const repoReady = !form.repo_url.trim() || repoConfirmed;
 
   const handleSaveProgram = async () => {
     if (!productId) return;
@@ -255,6 +325,11 @@ export default function NewProductPage() {
                 {scanError}
               </div>
             )}
+            {createError && (
+              <div className="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
+                {createError}
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -263,8 +338,11 @@ export default function NewProductPage() {
                   <input
                     type="text"
                     value={form.repo_url}
-                    onChange={e => setForm(f => ({ ...f, repo_url: e.target.value }))}
-                    onBlur={() => { if (form.repo_url) validateRepoUrl(form.repo_url); }}
+                    onChange={e => {
+                      setForm(f => ({ ...f, repo_url: e.target.value }));
+                      resetRepoConfirmation();
+                    }}
+                    onBlur={() => { if (form.repo_url) checkRepoAccess(); }}
                     className="flex-1 bg-mc-bg-tertiary border border-mc-border rounded-lg px-4 py-3 text-mc-text text-sm focus:outline-none focus:border-mc-accent"
                     placeholder="https://github.com/..."
                   />
@@ -277,8 +355,37 @@ export default function NewProductPage() {
                     {scanningRepo ? <Loader className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
                   </button>
                 </div>
-                {repoWarning && (
-                  <p className="text-[11px] text-amber-400 mt-1.5">{repoWarning}</p>
+                <button
+                  onClick={checkRepoAccess}
+                  disabled={!isValidUrl(form.repo_url) || checkingRepoAccess}
+                  className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 text-xs bg-mc-bg-tertiary border border-mc-border rounded-lg text-mc-text-secondary hover:text-mc-accent hover:border-mc-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {checkingRepoAccess ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  {checkingRepoAccess ? 'Checking...' : 'Check repo access'}
+                </button>
+                {repoCheck && (
+                  <div className={`mt-2 rounded-lg border px-3 py-2 text-xs ${
+                    repoConfirmed
+                      ? 'bg-green-500/10 border-green-500/25 text-green-300'
+                      : repoCheck.access === 'confirmed'
+                      ? 'bg-amber-500/10 border-amber-500/25 text-amber-300'
+                      : 'bg-red-500/10 border-red-500/25 text-red-300'
+                  }`}>
+                    <p>{repoCheck.message}</p>
+                    {repoCheck.defaultBranch && (
+                      <p className="mt-1 text-mc-text-secondary">Detected default branch: <span className="font-mono">{repoCheck.defaultBranch}</span></p>
+                    )}
+                    {repoCheck.error && <p className="mt-1 text-red-300">{repoCheck.error}</p>}
+                    {repoCheck.authHint && <p className="mt-1 text-mc-text-secondary">{repoCheck.authHint}</p>}
+                    {repoCheck.needsBranchConfirmation && repoCheck.resolvedBranch && (
+                      <button
+                        onClick={useDetectedBranch}
+                        className="mt-2 px-2.5 py-1 rounded bg-amber-500 text-black font-medium hover:bg-amber-400"
+                      >
+                        Use {repoCheck.resolvedBranch}
+                      </button>
+                    )}
+                  </div>
                 )}
                 <p className="text-[11px] text-mc-text-secondary mt-1.5">
                   Scan repo to auto-fill name & description from README
@@ -326,7 +433,10 @@ export default function NewProductPage() {
                 <input
                   type="text"
                   value={form.default_branch}
-                  onChange={e => setForm(f => ({ ...f, default_branch: e.target.value }))}
+                  onChange={e => {
+                    setForm(f => ({ ...f, default_branch: e.target.value }));
+                    resetRepoConfirmation();
+                  }}
                   className="w-full bg-mc-bg-tertiary border border-mc-border rounded-lg px-4 py-3 text-mc-text text-sm focus:outline-none focus:border-mc-accent"
                   placeholder="main"
                 />
@@ -345,10 +455,10 @@ export default function NewProductPage() {
 
             <button
               onClick={handleCreate}
-              disabled={!form.name.trim() || saving}
+              disabled={!form.name.trim() || saving || checkingRepoAccess || !repoReady}
               className="w-full min-h-11 bg-mc-accent text-white rounded-lg font-medium hover:bg-mc-accent/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              {saving ? 'Creating...' : 'Next: Product Program'}
+              {saving ? 'Creating...' : !repoReady ? 'Check repo access first' : 'Next: Product Program'}
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
